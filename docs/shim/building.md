@@ -7,13 +7,9 @@ editLink: true
 
 ## Prerequisites
 
-If you don't have a Rust compiler installed already, setup with:
+Install [rustup](https://rustup.rs/) if you haven't already.
 
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-With rustup installed, install the standard library cross compiled for MinGW:
+Then, install the standard library cross compiled for MinGW:
 
 ```bash
 rustup component add rust-std-x86_64-pc-windows-gnu
