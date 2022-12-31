@@ -2,6 +2,7 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   title: 'LatencyFleX 2',
+  description: '',
   themeConfig: {
     editLink: {
       pattern: 'https://github.com/ishitatsuyuki/latencyflex2/edit/main/docs/:path',
