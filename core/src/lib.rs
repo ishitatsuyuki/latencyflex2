@@ -338,47 +338,47 @@ pub unsafe extern "C" fn lfx2SleepUntil(target: Timestamp) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn lfx2ContextCreate() -> *const Context {
-    Arc::into_raw(Arc::new(Context::default()))
+pub unsafe extern "C" fn lfx2ContextCreate() -> *mut Context {
+    Arc::into_raw(Arc::new(Context::default())) as _
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn lfx2ContextAddRef(context: *const Context) {
+pub unsafe extern "C" fn lfx2ContextAddRef(context: *mut Context) {
     Arc::increment_strong_count(context);
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn lfx2ContextRelease(context: *const Context) {
+pub unsafe extern "C" fn lfx2ContextRelease(context: *mut Context) {
     Arc::decrement_strong_count(context);
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn lfx2FrameCreate(
-    context: *const Context,
+    context: *mut Context,
     out_timestamp: *mut Timestamp,
-) -> *const Frame {
+) -> *mut Frame {
     let context = Arc::from_raw(context);
     let (frame, timestamp) = context.inner.lock().unwrap().prepare_frame(context.clone());
     *out_timestamp = timestamp.unwrap_or(timestamp_now());
     let _ = Arc::into_raw(context);
-    Arc::into_raw(frame)
+    Arc::into_raw(frame) as _
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn lfx2FrameAddRef(frame: *const Frame) {
+pub unsafe extern "C" fn lfx2FrameAddRef(frame: *mut Frame) {
     (*frame).add_ref();
     Arc::increment_strong_count(frame);
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn lfx2FrameRelease(frame: *const Frame) {
+pub unsafe extern "C" fn lfx2FrameRelease(frame: *mut Frame) {
     (*frame).release();
     Arc::decrement_strong_count(frame);
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn lfx2MarkSection(
-    frame: *const Frame,
+    frame: *mut Frame,
     section_id: SectionId,
     mark_type: MarkType,
     timestamp: Timestamp,

@@ -39,20 +39,20 @@ LFX2_API lfx2Timestamp lfx2TimestampFromQpc(uint64_t qpc);
 
 LFX2_API void lfx2SleepUntil(lfx2Timestamp target);
 
-LFX2_API const lfx2Context *lfx2ContextCreate();
+LFX2_API lfx2Context *lfx2ContextCreate();
 
-LFX2_API void lfx2ContextAddRef(const lfx2Context *context);
+LFX2_API void lfx2ContextAddRef(lfx2Context *context);
 
-LFX2_API void lfx2ContextRelease(const lfx2Context *context);
+LFX2_API void lfx2ContextRelease(lfx2Context *context);
 
-LFX2_API const lfx2Frame *lfx2FrameCreate(const lfx2Context *context, lfx2Timestamp *out_timestamp);
+LFX2_API lfx2Frame *lfx2FrameCreate(lfx2Context *context, lfx2Timestamp *out_timestamp);
 
-LFX2_API void lfx2FrameAddRef(const lfx2Frame *frame);
+LFX2_API void lfx2FrameAddRef(lfx2Frame *frame);
 
-LFX2_API void lfx2FrameRelease(const lfx2Frame *frame);
+LFX2_API void lfx2FrameRelease(lfx2Frame *frame);
 
 LFX2_API
-void lfx2MarkSection(const lfx2Frame *frame,
+void lfx2MarkSection(lfx2Frame *frame,
                      lfx2SectionId section_id,
                      lfx2MarkType mark_type,
                      lfx2Timestamp timestamp);
