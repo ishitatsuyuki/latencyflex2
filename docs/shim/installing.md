@@ -38,6 +38,8 @@ Overwrite your Proton Experimental installation's DXVK-NVAPI dlls with the just 
 cp x64/nvapi64.dll ~/.steam/steam/steamapps/common/Proton\ -\ Experimental/files/lib64/wine/nvapi
 ```
 
+Now proceed on to [Environment Variables](#environment-variables) and [Configuration Files](#configuration-files).
+
 ## Lutris
 
 ### Prerequisite
@@ -76,6 +78,8 @@ cp -r x32 x64 ~/.local/share/lutris/runtime/dxvk-nvapi/lfx2/
 ```
 
 Then **Right Click** the game, go to **Configure** → **Runner Options** → **DXVK-NVAPI version** and manually type in "lfx2".
+
+Now proceed on to [Environment Variables](#environment-variables) and [Configuration Files](#configuration-files).
 
 ## Environment Variables
 

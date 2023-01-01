@@ -48,7 +48,7 @@ Then follow the upstream [build instructions](https://github.com/doitsujin/dxvk#
 Clone the fork and checkout the `lfx2` branch:
 
 ```bash
-git clone https://github.com/ishitatsuyuki/dxvk-nvapi.git -b lfx2
+git clone --recursive https://github.com/ishitatsuyuki/dxvk-nvapi.git -b lfx2
 ```
 
 Then follow the upstream [build instructions](https://github.com/jp7677/dxvk-nvapi#how-to-build).
