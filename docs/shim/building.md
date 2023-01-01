@@ -9,10 +9,10 @@ editLink: true
 
 Install [rustup](https://rustup.rs/) if you haven't already.
 
-Then, install the standard library cross compiled for MinGW:
+Then, install the MinGW target for Rust:
 
 ```bash
-rustup component add rust-std-x86_64-pc-windows-gnu
+rustup target add x86_64-pc-windows-gnu
 ```
 
 ## Compiling the core module
