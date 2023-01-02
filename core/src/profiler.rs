@@ -29,8 +29,8 @@ impl Profiler {
     }
 
     pub fn mark(&mut self, frame_id: FrameId, section_id: SectionId, mark_type: MarkType, timestamp: Timestamp) {
-        let name = section_id;
-        let tid = frame_id.0 % 16;
+        let name = frame_id.0;
+        let tid = section_id;
         let ph = match mark_type {
             MarkType::Begin => "B",
             MarkType::End => "E",
