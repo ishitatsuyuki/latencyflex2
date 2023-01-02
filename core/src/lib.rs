@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::num::NonZeroU64;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Once};
 use std::{cmp, hint, ptr};
 
 #[cfg(target_os = "linux")]
@@ -114,6 +114,14 @@ impl ContextInner {
                 marks: Default::default(),
             },
         );
+
+        static LEAK_WARN: Once = Once::new();
+        const LEAK_WARN_THRESHOLD: usize = 16;
+        if self.frames.len() > 16 {
+            LEAK_WARN.call_once(|| {
+                eprintln!("LFX2 WARN: More than {LEAK_WARN_THRESHOLD} frames in flight. Did you forget to call lfx2FrameRelease()?");
+            });
+        }
 
         let handle = Arc::new(Frame { context, id });
 
