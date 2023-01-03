@@ -50,8 +50,9 @@ struct ContextInner {
     reference_frame: Option<FrameImpl>,
     optimal_latency_estimator: EwmaEstimator,
     bandwidth_estimator: BTreeMap<SectionId, EwmaEstimator>,
+    target_top_frame_time: Option<u64>,
 
-    profiler: Profiler
+    profiler: Profiler,
 }
 
 impl Default for ContextInner {
@@ -63,6 +64,7 @@ impl Default for ContextInner {
             optimal_latency_estimator: EwmaEstimator::new(0.7),
             bandwidth_estimator: BTreeMap::new(),
             profiler: Profiler::new(),
+            target_top_frame_time: None,
         }
     }
 }
@@ -75,33 +77,57 @@ pub struct Frame {
 
 struct FrameImpl {
     writer_count: usize,
+    predicted_begin: u64,
     predicted_duration: u64,
     marks: BTreeMap<(SectionId, MarkType), Timestamp>,
 }
 
 impl ContextInner {
+    fn frames_iter(&self) -> impl DoubleEndedIterator<Item=&FrameImpl> {
+        self.reference_frame.iter().chain(self.frames.values())
+    }
+
     fn last_predicted_frame_end(&self) -> Option<Timestamp> {
         self.reference_frame.as_ref().map(|reference_frame| {
             reference_frame.end_ts()
                 + self
-                    .frames
-                    .iter()
-                    .map(|(_, frame)| frame.predicted_duration)
-                    .sum::<u64>()
+                .frames
+                .iter()
+                .map(|(_, frame)| frame.predicted_duration)
+                .sum::<u64>()
         })
     }
 
-    fn prepare_frame(&mut self, context: Arc<Context>) -> (Arc<Frame>, Option<Timestamp>) {
+    fn prepare_frame(&mut self, context: Arc<Context>) -> (Arc<Frame>, Timestamp) {
         let predicted_duration = self
             .bandwidth_estimator
             .iter()
             .map(|(_, e)| e.get() as u64)
             .max()
             .unwrap_or(0);
+
         let bias = 1000000;
-        let target = self.last_predicted_frame_end().map(|predicted_frame_end| {
+        let now = timestamp_now();
+        let mut target = self.last_predicted_frame_end().map(|predicted_frame_end| {
             predicted_frame_end + predicted_duration - self.optimal_latency_estimator.get() as u64 - bias
-        });
+        }).unwrap_or(now).max(now);
+
+        let last_frame_top = self.frames_iter().next_back().map(|f| f.begin_ts());
+        if let Some(last_frame_top) = last_frame_top {
+            let top_interval = target - last_frame_top;
+            if let Some(target_top_frame_time) = self.target_top_frame_time {
+                const HALF_LIFE: f64 = 100_000_000.;
+                let tolerance = 2f64.powf(target_top_frame_time as f64 / HALF_LIFE);
+                let inv_tolerance = 2f64.powf(-(target_top_frame_time as f64) / HALF_LIFE);
+                let max = (tolerance * target_top_frame_time as f64) as u64;
+                let min = (inv_tolerance * target_top_frame_time as f64) as u64;
+                let new_target_frame_time = top_interval.clamp(min, max);
+                target = (last_frame_top + new_target_frame_time).max(now);
+                self.target_top_frame_time = Some(new_target_frame_time);
+            } else {
+                self.target_top_frame_time = Some(top_interval);
+            }
+        }
 
         let id = self.next_frame_id;
         self.next_frame_id.0 += 1;
@@ -110,6 +136,7 @@ impl ContextInner {
             id,
             FrameImpl {
                 writer_count: 1,
+                predicted_begin: target,
                 predicted_duration,
                 marks: Default::default(),
             },
@@ -309,9 +336,9 @@ fn sleep_until(target: Timestamp) {
             TIMER_ALL_ACCESS.0,
         )
     }
-    .unwrap();
+        .unwrap();
 
-    dbg!(now, target);
+    eprintln!("LFX2 Sleep: {}us", target.saturating_sub(now) / 1000);
 
     while now + MIN_SPIN_PERIOD < target {
         let sleep_duration = -((target - now - MIN_SPIN_PERIOD) as i64) / 100;
@@ -367,7 +394,7 @@ pub unsafe extern "C" fn lfx2FrameCreate(
 ) -> *mut Frame {
     let context = Arc::from_raw(context);
     let (frame, timestamp) = context.inner.lock().unwrap().prepare_frame(context.clone());
-    *out_timestamp = timestamp.unwrap_or(timestamp_now());
+    *out_timestamp = timestamp;
     let _ = Arc::into_raw(context);
     Arc::into_raw(frame) as _
 }
