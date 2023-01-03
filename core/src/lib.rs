@@ -1,6 +1,9 @@
-use std::cmp;
-use std::collections::BTreeMap;
+use std::{cmp, thread};
+use std::collections::{BTreeMap, VecDeque};
+use std::ptr::NonNull;
 use std::sync::{Arc, Mutex, Once};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use crate::ewma::EwmaEstimator;
 use crate::profiler::Profiler;
@@ -69,7 +72,7 @@ struct FrameImpl {
 }
 
 impl ContextInner {
-    fn frames_iter(&self) -> impl DoubleEndedIterator<Item = &FrameImpl> {
+    fn frames_iter(&self) -> impl DoubleEndedIterator<Item=&FrameImpl> {
         self.reference_frame.iter().chain(self.frames.values())
     }
 
@@ -77,10 +80,10 @@ impl ContextInner {
         self.reference_frame.as_ref().map(|reference_frame| {
             reference_frame.end_ts()
                 + self
-                    .frames
-                    .iter()
-                    .map(|(_, frame)| frame.predicted_duration)
-                    .sum::<u64>()
+                .frames
+                .iter()
+                .map(|(_, frame)| frame.predicted_duration)
+                .sum::<u64>()
         })
     }
 
@@ -152,11 +155,11 @@ impl ContextInner {
         const MAX_LATENCY: u64 = 200_000_000;
 
         while let Some((
-            _,
-            FrameImpl {
-                writer_count: 0, ..
-            },
-        )) = self.frames.first_key_value()
+                           _,
+                           FrameImpl {
+                               writer_count: 0, ..
+                           },
+                       )) = self.frames.first_key_value()
         {
             let (_, frame) = self.frames.pop_first().unwrap();
 
@@ -188,21 +191,6 @@ impl ContextInner {
 }
 
 impl Frame {
-    fn add_ref(&self) {
-        let mut inner = self.context.inner.lock().unwrap();
-        let frame = inner.frames.get_mut(&self.id).unwrap();
-        frame.writer_count += 1;
-    }
-
-    fn release(&self) {
-        let mut inner = self.context.inner.lock().unwrap();
-        let frame = inner.frames.get_mut(&self.id).unwrap();
-        frame.writer_count -= 1;
-        if frame.writer_count == 0 {
-            inner.update_estimates();
-        }
-    }
-
     fn mark(&self, section_id: SectionId, mark_type: MarkType, timestamp: Timestamp) {
         let mut inner = self.context.inner.lock().unwrap();
         inner
@@ -213,6 +201,17 @@ impl Frame {
         inner
             .profiler
             .mark(self.id, section_id, mark_type, timestamp);
+    }
+}
+
+impl Drop for Frame {
+    fn drop(&mut self) {
+        let mut inner = self.context.inner.lock().unwrap();
+        let frame = inner.frames.get_mut(&self.id).unwrap();
+        frame.writer_count -= 1;
+        if frame.writer_count == 0 {
+            inner.update_estimates();
+        }
     }
 }
 
@@ -277,6 +276,71 @@ impl FrameImpl {
     }
 }
 
+#[derive(Default)]
+pub struct ImplicitContext {
+    inner: Mutex<ImplicitContextInner>,
+    need_reset: AtomicBool,
+}
+
+#[derive(Default)]
+struct ImplicitContextInner {
+    context: Arc<Context>,
+    frame_queue: VecDeque<Arc<Frame>>,
+}
+
+impl ImplicitContext {
+    fn enqueue(&self) -> (Arc<Frame>, Timestamp) {
+        const RESET_FLUSH_TIME: Duration = Duration::from_millis(200);
+        const RENDER_DESYNC_THRESHOLD: usize = 16;
+
+        let mut inner = if self.need_reset.load(Ordering::SeqCst) {
+            thread::sleep(RESET_FLUSH_TIME);
+            let mut inner = self.inner.lock().unwrap();
+            self.need_reset.store(false, Ordering::SeqCst);
+            inner.frame_queue.clear();
+            eprintln!("LFX2: Reset implicit context done");
+            inner
+        } else {
+            self.inner.lock().unwrap()
+        };
+
+        let mut context = inner.context.inner.lock().unwrap();
+        let (frame, timestamp) = context.prepare_frame(inner.context.clone());
+        drop(context);
+        inner.frame_queue.push_back(frame.clone());
+
+        if inner.frame_queue.len() > RENDER_DESYNC_THRESHOLD {
+            eprintln!("LFX2: Resetting implicit context: too many inflight frames");
+            self.need_reset.store(true, Ordering::SeqCst);
+        }
+
+        (frame, timestamp)
+    }
+
+    fn dequeue(&self, critical: bool) -> Option<Arc<Frame>> {
+        if self.need_reset.load(Ordering::SeqCst) {
+            return None;
+        }
+        let mut inner = self.inner.lock().unwrap();
+        match inner.frame_queue.pop_front() {
+            Some(frame) => Some(frame),
+            None => {
+                if critical {
+                    eprintln!("LFX2: Resetting implicit context: too many inflight frames");
+                    self.need_reset.store(true, Ordering::SeqCst);
+                }
+                None
+            }
+        }
+    }
+
+    fn reset(&self) {
+        let _mutex = self.inner.lock().unwrap();
+        eprintln!("LFX2: Resetting implicit context: swapchain recreated");
+        self.need_reset.store(true, Ordering::SeqCst);
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn lfx2TimestampNow() -> Timestamp {
     timestamp_now()
@@ -322,13 +386,11 @@ pub unsafe extern "C" fn lfx2FrameCreate(
 
 #[no_mangle]
 pub unsafe extern "C" fn lfx2FrameAddRef(frame: *mut Frame) {
-    (*frame).add_ref();
     Arc::increment_strong_count(frame);
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn lfx2FrameRelease(frame: *mut Frame) {
-    (*frame).release();
     Arc::decrement_strong_count(frame);
 }
 
@@ -340,4 +402,39 @@ pub unsafe extern "C" fn lfx2MarkSection(
     timestamp: Timestamp,
 ) {
     (*frame).mark(section_id, mark_type, timestamp);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn lfx2ImplicitContextCreate() -> *mut ImplicitContext {
+    let context = Box::new(ImplicitContext::default());
+    Box::into_raw(context)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn lfx2ImplicitContextRelease(context: *mut ImplicitContext) {
+    let _ = Box::from_raw(context);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn lfx2ImplicitContextReset(context: *mut ImplicitContext) {
+    (*context).reset();
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn lfx2FrameCreateImplicit(
+    context: *mut ImplicitContext,
+    out_timestamp: *mut Timestamp,
+) -> *mut Frame {
+    let (frame, timestamp) = (*context).enqueue();
+    *out_timestamp = timestamp;
+    Arc::into_raw(frame) as _
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn lfx2FrameDequeueImplicit(
+    context: *mut ImplicitContext,
+    critical: bool,
+) -> Option<NonNull<Frame>> {
+    let frame = (*context).dequeue(critical);
+    frame.map(|f| NonNull::new(Arc::into_raw(f) as _).unwrap())
 }

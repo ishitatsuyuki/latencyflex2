@@ -6,7 +6,8 @@
 
 
 
-language = "C++"
+language = "C"
+cpp_compat = true
 
 
 
