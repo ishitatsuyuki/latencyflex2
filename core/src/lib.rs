@@ -98,7 +98,7 @@ impl ContextInner {
             predicted_frame_end + predicted_duration - self.optimal_latency_estimator.get() as u64 - bias
         }).unwrap_or(now).max(now);
 
-        let last_frame_top = self.frames_iter().next_back().map(|f| f.begin_ts());
+        let last_frame_top = self.frames_iter().next_back().map(|f| f.predicted_begin);
         if let Some(last_frame_top) = last_frame_top {
             let top_interval = target - last_frame_top;
             if let Some(target_top_frame_time) = self.target_top_frame_time {
