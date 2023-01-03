@@ -15,7 +15,11 @@ impl Profiler {
     pub fn new() -> Profiler {
         let filename = format!("lfx2.{}.json", Local::now().format("%Y.%m.%d-%H.%M.%S"));
         let mut output = BufWriter::new(loop {
-            let result = OpenOptions::new().read(true).write(true).create_new(true).open(&filename);
+            let result = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&filename);
             match result {
                 Ok(f) => break f,
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -25,10 +29,19 @@ impl Profiler {
             }
         });
         writeln!(output, "[").unwrap();
-        Profiler { output, is_first_mark: true }
+        Profiler {
+            output,
+            is_first_mark: true,
+        }
     }
 
-    pub fn mark(&mut self, frame_id: FrameId, section_id: SectionId, mark_type: MarkType, timestamp: Timestamp) {
+    pub fn mark(
+        &mut self,
+        frame_id: FrameId,
+        section_id: SectionId,
+        mark_type: MarkType,
+        timestamp: Timestamp,
+    ) {
         let name = frame_id.0;
         let tid = section_id;
         let ph = match mark_type {
@@ -38,7 +51,10 @@ impl Profiler {
         let ts = timestamp / 1000;
         let comma = if self.is_first_mark { "" } else { ",\n" };
         self.is_first_mark = false;
-        let _ = write!(self.output, r#"{comma}  {{"name": "{name}", "cat": "MARKER", "ph": "{ph}", "pid": 1, "tid": {tid}, "ts": {ts}}}"#);
+        let _ = write!(
+            self.output,
+            r#"{comma}  {{"name": "{name}", "cat": "MARKER", "ph": "{ph}", "pid": 1, "tid": {tid}, "ts": {ts}}}"#
+        );
         let _ = self.output.flush();
     }
 }

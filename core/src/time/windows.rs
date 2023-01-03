@@ -5,7 +5,7 @@ use once_cell::sync::Lazy;
 use windows::Win32::Foundation::CloseHandle;
 use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
 use windows::Win32::System::Threading::{
-    CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, CreateWaitableTimerExW, SetWaitableTimer,
+    CreateWaitableTimerExW, SetWaitableTimer, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
     TIMER_ALL_ACCESS,
 };
 
@@ -46,7 +46,7 @@ pub fn sleep_until(target: Timestamp) {
             TIMER_ALL_ACCESS.0,
         )
     }
-        .unwrap();
+    .unwrap();
 
     eprintln!("LFX2 Sleep: {}us", target.saturating_sub(now) / 1000);
 

@@ -1,6 +1,6 @@
+use std::cmp;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, Once};
-use std::cmp;
 
 use crate::ewma::EwmaEstimator;
 use crate::profiler::Profiler;
@@ -69,7 +69,7 @@ struct FrameImpl {
 }
 
 impl ContextInner {
-    fn frames_iter(&self) -> impl DoubleEndedIterator<Item=&FrameImpl> {
+    fn frames_iter(&self) -> impl DoubleEndedIterator<Item = &FrameImpl> {
         self.reference_frame.iter().chain(self.frames.values())
     }
 
@@ -77,10 +77,10 @@ impl ContextInner {
         self.reference_frame.as_ref().map(|reference_frame| {
             reference_frame.end_ts()
                 + self
-                .frames
-                .iter()
-                .map(|(_, frame)| frame.predicted_duration)
-                .sum::<u64>()
+                    .frames
+                    .iter()
+                    .map(|(_, frame)| frame.predicted_duration)
+                    .sum::<u64>()
         })
     }
 
@@ -94,9 +94,15 @@ impl ContextInner {
 
         let bias = 1000000;
         let now = timestamp_now();
-        let mut target = self.last_predicted_frame_end().map(|predicted_frame_end| {
-            predicted_frame_end + predicted_duration - self.optimal_latency_estimator.get() as u64 - bias
-        }).unwrap_or(now).max(now);
+        let mut target = self
+            .last_predicted_frame_end()
+            .map(|predicted_frame_end| {
+                predicted_frame_end + predicted_duration
+                    - self.optimal_latency_estimator.get() as u64
+                    - bias
+            })
+            .unwrap_or(now)
+            .max(now);
 
         let last_frame_top = self.frames_iter().next_back().map(|f| f.predicted_begin);
         if let Some(last_frame_top) = last_frame_top {
@@ -162,7 +168,11 @@ impl ContextInner {
                 let optimal_latency = real_latency.saturating_sub(queueing_delay);
                 self.optimal_latency_estimator
                     .update(cmp::min(optimal_latency, MAX_LATENCY) as f64);
-                dbg!(real_latency, optimal_latency, self.optimal_latency_estimator.get());
+                dbg!(
+                    real_latency,
+                    optimal_latency,
+                    self.optimal_latency_estimator.get()
+                );
             }
 
             for (section_id, duration) in frame.inverse_throughput().into_iter() {
@@ -200,7 +210,9 @@ impl Frame {
             .get_mut(&self.id)
             .unwrap()
             .mark(section_id, mark_type, timestamp);
-        inner.profiler.mark(self.id, section_id, mark_type, timestamp);
+        inner
+            .profiler
+            .mark(self.id, section_id, mark_type, timestamp);
     }
 }
 
