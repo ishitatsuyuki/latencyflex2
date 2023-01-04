@@ -5,9 +5,10 @@ use once_cell::sync::Lazy;
 use windows::Win32::Foundation::CloseHandle;
 use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
 use windows::Win32::System::Threading::{
-    CreateWaitableTimerExW, SetWaitableTimer, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
-    TIMER_ALL_ACCESS,
+    CreateWaitableTimerExW, SetWaitableTimer, WaitForSingleObject,
+    CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS,
 };
+use windows::Win32::System::WindowsProgramming::INFINITE;
 
 use crate::Timestamp;
 
@@ -54,6 +55,7 @@ pub fn sleep_until(target: Timestamp) {
         let sleep_duration = -((target - now - MIN_SPIN_PERIOD) as i64) / 100;
         unsafe {
             SetWaitableTimer(timer, &sleep_duration, 0, None, None, false);
+            WaitForSingleObject(timer, INFINITE).ok().unwrap();
         }
         now = timestamp_now();
     }
