@@ -1,6 +1,7 @@
+use parking_lot::Mutex;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Once};
+use std::sync::{Arc, Once};
 use std::time::Duration;
 use std::{cmp, thread};
 
@@ -192,7 +193,7 @@ impl ContextInner {
 
 impl Frame {
     fn mark(&self, section_id: SectionId, mark_type: MarkType, timestamp: Timestamp) {
-        let mut inner = self.context.inner.lock().unwrap();
+        let mut inner = self.context.inner.lock();
         inner
             .frames
             .get_mut(&self.id)
@@ -206,7 +207,7 @@ impl Frame {
 
 impl Drop for Frame {
     fn drop(&mut self) {
-        let mut inner = self.context.inner.lock().unwrap();
+        let mut inner = self.context.inner.lock();
         let frame = inner.frames.get_mut(&self.id).unwrap();
         frame.writer_count -= 1;
         if frame.writer_count == 0 {
@@ -295,16 +296,16 @@ impl ImplicitContext {
 
         let mut inner = if self.need_reset.load(Ordering::SeqCst) {
             thread::sleep(RESET_FLUSH_TIME);
-            let mut inner = self.inner.lock().unwrap();
+            let mut inner = self.inner.lock();
             self.need_reset.store(false, Ordering::SeqCst);
             inner.frame_queue.clear();
             eprintln!("LFX2: Reset implicit context done");
             inner
         } else {
-            self.inner.lock().unwrap()
+            self.inner.lock()
         };
 
-        let mut context = inner.context.inner.lock().unwrap();
+        let mut context = inner.context.inner.lock();
         let (frame, timestamp) = context.prepare_frame(inner.context.clone());
         drop(context);
         inner.frame_queue.push_back(frame.clone());
@@ -321,7 +322,7 @@ impl ImplicitContext {
         if self.need_reset.load(Ordering::SeqCst) {
             return None;
         }
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         match inner.frame_queue.pop_front() {
             Some(frame) => Some(frame),
             None => {
@@ -335,7 +336,7 @@ impl ImplicitContext {
     }
 
     fn reset(&self) {
-        let _mutex = self.inner.lock().unwrap();
+        let _mutex = self.inner.lock();
         eprintln!("LFX2: Resetting implicit context: swapchain recreated");
         self.need_reset.store(true, Ordering::SeqCst);
     }

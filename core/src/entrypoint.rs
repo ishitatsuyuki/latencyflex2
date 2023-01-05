@@ -41,7 +41,7 @@ pub unsafe extern "C" fn lfx2FrameCreate(
     out_timestamp: *mut Timestamp,
 ) -> *mut Frame {
     let context = Arc::from_raw(context);
-    let (frame, timestamp) = context.inner.lock().unwrap().prepare_frame(context.clone());
+    let (frame, timestamp) = context.inner.lock().prepare_frame(context.clone());
     *out_timestamp = timestamp;
     let _ = Arc::into_raw(context);
     Arc::into_raw(frame) as _
