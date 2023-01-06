@@ -9,6 +9,8 @@ use crate::ewma::EwmaEstimator;
 use crate::profiler::Profiler;
 use crate::time::*;
 
+#[cfg(all(feature = "dx12", target_os = "windows"))]
+mod dx12;
 mod entrypoint;
 mod ewma;
 mod profiler;
@@ -18,6 +20,7 @@ mod time;
 
 type SectionId = u32;
 type Timestamp = u64;
+type Interval = u64;
 
 #[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
 struct FrameId(u64);

@@ -26,11 +26,22 @@ sys_includes = []
 includes = []
 no_includes = false
 after_includes = """
+#ifdef LFX2_DX12
+#include <d3d12.h>
+#endif
+
 #ifdef _WIN32
 #define LFX2_API __declspec(dllimport)
 #else
 #define LFX2_API
 #endif
+
+typedef struct lfx2Dx12SubmitAux {
+    ID3D12GraphicsCommandList* executeBefore;
+    ID3D12GraphicsCommandList* executeAfter;
+    ID3D12Fence* fence;
+    uint64_t fenceValue;
+} lfx2Dx12SubmitAux;
 """
 
 
@@ -59,7 +70,7 @@ usize_is_size_t = true
 
 [defines]
 "target_os = windows" = "_WIN32"
-# "feature = serde" = "DEFINE_SERDE"
+"feature = dx12" = "LFX2_DX12"
 
 
 
@@ -73,7 +84,8 @@ renaming_overrides_prefixing = true
 
 
 [export.rename]
-
+"ID3D12Device" = "ID3D12Device*"
+"ID3D12CommandQueue" = "ID3D12CommandQueue*"
 
 [export.body]
 

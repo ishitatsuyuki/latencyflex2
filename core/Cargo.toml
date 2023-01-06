@@ -18,6 +18,10 @@ parking_lot = "0.12.1"
 version = "0.43.0"
 features = ["Win32_Foundation", "Win32_System_Threading", "Win32_System_Performance", "Win32_Security", "Win32_System_WindowsProgramming"]
 
+[features]
+default = ["dx12"]
+dx12 = ["windows/Win32_Graphics_Direct3D12", "windows/Win32_Graphics_Dxgi_Common"]
+
 [profile.dev]
 panic = "abort"
 
