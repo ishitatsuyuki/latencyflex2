@@ -2,7 +2,7 @@ use std::hint;
 use std::num::NonZeroU64;
 
 use once_cell::sync::Lazy;
-use windows::Win32::Foundation::CloseHandle;
+use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
 use windows::Win32::System::Threading::{
     CreateWaitableTimerExW, SetWaitableTimer, WaitForSingleObject,
@@ -35,28 +35,50 @@ pub fn timestamp_now() -> Timestamp {
     timestamp_from_qpc(qpc as u64)
 }
 
+struct WaitableTimer(HANDLE);
+
+impl WaitableTimer {
+    fn new() -> WaitableTimer {
+        WaitableTimer(
+            unsafe {
+                CreateWaitableTimerExW(
+                    None,
+                    None,
+                    CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                    TIMER_ALL_ACCESS.0,
+                )
+            }
+            .unwrap(),
+        )
+    }
+}
+
+impl Drop for WaitableTimer {
+    fn drop(&mut self) {
+        unsafe {
+            CloseHandle(self.0);
+        }
+    }
+}
+
+thread_local! {
+    static TIMER: WaitableTimer = WaitableTimer::new();
+}
+
 pub fn sleep_until(target: Timestamp) {
     const MIN_SPIN_PERIOD: u64 = 500_000;
     let mut now = timestamp_now();
-
-    let timer = unsafe {
-        CreateWaitableTimerExW(
-            None,
-            None,
-            CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
-            TIMER_ALL_ACCESS.0,
-        )
-    }
-    .unwrap();
 
     eprintln!("LFX2 Sleep: {}us", target.saturating_sub(now) / 1000);
 
     while now + MIN_SPIN_PERIOD < target {
         let sleep_duration = -((target - now - MIN_SPIN_PERIOD) as i64) / 100;
-        unsafe {
-            SetWaitableTimer(timer, &sleep_duration, 0, None, None, false);
-            WaitForSingleObject(timer, INFINITE).ok().unwrap();
-        }
+        TIMER.with(|timer| unsafe {
+            SetWaitableTimer(timer.0, &sleep_duration, 0, None, None, false)
+                .ok()
+                .unwrap();
+            WaitForSingleObject(timer.0, INFINITE).ok().unwrap();
+        });
         now = timestamp_now();
     }
 
@@ -65,5 +87,5 @@ pub fn sleep_until(target: Timestamp) {
         now = timestamp_now();
     }
 
-    unsafe { CloseHandle(timer) }.unwrap();
+    eprintln!("LFX2 Sleep excess: {}us", now.saturating_sub(target) / 1000);
 }
