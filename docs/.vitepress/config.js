@@ -5,7 +5,7 @@ export default defineConfig({
   description: '',
   themeConfig: {
     editLink: {
-      pattern: 'https://github.com/ishitatsuyuki/latencyflex2/edit/main/docs/:path',
+      pattern: 'https://github.com/ishitatsuyuki/latencyflex2/edit/master/docs/:path',
       text: 'Edit this page on GitHub',
     },
     nav: [
