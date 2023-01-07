@@ -54,7 +54,7 @@ impl Default for ContextInner {
             next_frame_id: FrameId(0),
             frames: BTreeMap::new(),
             reference_frame: None,
-            optimal_latency_estimator: EwmaEstimator::new(0.7),
+            optimal_latency_estimator: EwmaEstimator::new(0.5),
             bandwidth_estimator: BTreeMap::new(),
             profiler: Profiler::new(),
             target_top_frame_time: None,
@@ -115,6 +115,7 @@ impl ContextInner {
         if let Some(last_frame_top) = last_frame_top {
             let top_interval = target - last_frame_top;
             if let Some(target_top_frame_time) = self.target_top_frame_time {
+                let target_top_frame_time = target_top_frame_time.clamp(1_000_000, 100_000_000);
                 const HALF_LIFE: f64 = 100_000_000.;
                 let tolerance = 2f64.powf(target_top_frame_time as f64 / HALF_LIFE);
                 let inv_tolerance = 2f64.powf(-(target_top_frame_time as f64) / HALF_LIFE);
@@ -185,7 +186,7 @@ impl ContextInner {
             for (section_id, duration) in frame.inverse_throughput().into_iter() {
                 self.bandwidth_estimator
                     .entry(section_id)
-                    .or_insert_with(|| EwmaEstimator::new(0.7))
+                    .or_insert_with(|| EwmaEstimator::new(0.5))
                     .update(cmp::min(duration, MAX_FRAME_TIME) as f64);
             }
 
