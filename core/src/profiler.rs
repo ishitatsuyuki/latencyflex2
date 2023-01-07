@@ -13,8 +13,8 @@ pub struct Profiler {
 
 impl Profiler {
     pub fn new() -> Profiler {
-        let filename = format!("lfx2.{}.json", Local::now().format("%Y.%m.%d-%H.%M.%S"));
         let mut output = BufWriter::new(loop {
+            let filename = format!("lfx2.{}.json", Local::now().format("%Y.%m.%d-%H.%M.%S"));
             let result = OpenOptions::new()
                 .read(true)
                 .write(true)
