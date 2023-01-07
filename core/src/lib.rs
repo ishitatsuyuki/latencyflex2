@@ -254,6 +254,10 @@ impl FrameImpl {
         let last_ends = filter_marks_by_type(&reference.marks, MarkType::End);
         let mut delays = Vec::new();
         for (section_id, handoff_time) in ends {
+            if section_id == 0 {
+                delays.push(0);
+                continue;
+            }
             let stage_after_idx =
                 last_ends.partition_point(|&(other_section_id, _)| other_section_id <= section_id);
             if let Some(&(_, last_end_time)) = last_ends.get(stage_after_idx) {
