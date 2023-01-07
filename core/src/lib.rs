@@ -1,7 +1,8 @@
 use parking_lot::Mutex;
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Once};
+use std::sync::{Arc, Once, Weak};
 use std::time::Duration;
 use std::{cmp, thread};
 
@@ -69,7 +70,7 @@ pub struct Frame {
 }
 
 struct FrameImpl {
-    writer_count: usize,
+    writer: Weak<Frame>,
     predicted_begin: u64,
     predicted_duration: u64,
     marks: BTreeMap<(SectionId, MarkType), Timestamp>,
@@ -92,6 +93,8 @@ impl ContextInner {
     }
 
     fn prepare_frame(&mut self, context: Arc<Context>) -> (Arc<Frame>, Timestamp) {
+        self.update_estimates();
+
         let predicted_duration = self
             .bandwidth_estimator
             .iter()
@@ -132,10 +135,12 @@ impl ContextInner {
         let id = self.next_frame_id;
         self.next_frame_id.0 += 1;
 
+        let handle = Arc::new(Frame { context, id });
+
         self.frames.insert(
             id,
             FrameImpl {
-                writer_count: 1,
+                writer: Arc::downgrade(&handle),
                 predicted_begin: target,
                 predicted_duration,
                 marks: Default::default(),
@@ -150,8 +155,6 @@ impl ContextInner {
             });
         }
 
-        let handle = Arc::new(Frame { context, id });
-
         (handle, target)
     }
 
@@ -159,14 +162,12 @@ impl ContextInner {
         const MAX_FRAME_TIME: u64 = 50_000_000;
         const MAX_LATENCY: u64 = 200_000_000;
 
-        while let Some((
-            _,
-            FrameImpl {
-                writer_count: 0, ..
-            },
-        )) = self.frames.first_key_value()
-        {
-            let (_, frame) = self.frames.pop_first().unwrap();
+        while let Some(first) = self.frames.first_entry() {
+            if first.get().writer.strong_count() != 0 {
+                break;
+            }
+
+            let frame = first.remove_entry().1;
 
             if let Some(reference_frame) = &self.reference_frame {
                 let queueing_delay = frame.queueing_delay(reference_frame);
@@ -206,17 +207,6 @@ impl Frame {
         inner
             .profiler
             .mark(self.id, section_id, mark_type, timestamp);
-    }
-}
-
-impl Drop for Frame {
-    fn drop(&mut self) {
-        let mut inner = self.context.inner.lock();
-        let frame = inner.frames.get_mut(&self.id).unwrap();
-        frame.writer_count -= 1;
-        if frame.writer_count == 0 {
-            inner.update_estimates();
-        }
     }
 }
 
