@@ -12,41 +12,64 @@ editLink: true
 - **Proton Experimental (Bleeding Edge)**: 7.0-32084-20221229 or later  
   A new version is required due to a [bug](https://github.com/ValveSoftware/wine/pull/171) that resulted in GPU timestamps to have drifted values.
 
-### Installing the core module
+### Overview
+
+Due to Proton conventions, there are two kind of installation steps:
+- Done once per **prefix**: LatencyFleX 2 Core Module
+- Done once per **Proton version**: DXVK, DXVK-NVAPI and VKD3D-Proton
+
+### Per-prefix setup
+
+For the following section, set `COMPATDATA` to the path to the app prefix.
+
+This can be determined from the app's Steam AppID, like: 
+
+```bash
+APPID=1234567
+COMPATDATA=~"/.steam/steam/steamapps/compatdata/$APPID"
+```
+
+#### Installing the core module
 
 Copy the just built core module into the `system32` folder under your prefix.
 
-Replace `<appid>` in the snippet below with your app's Steam AppID.
-
 ```bash
-cp target/x86_64-pc-windows-gnu/release/latencyflex2_rust.dll ~/.steam/steam/steamapps/compatdata/<appid>/pfx/drive_c/windows/system32/
+cp target/x86_64-pc-windows-gnu/release/latencyflex2_rust.dll "$COMPATDATA/pfx/drive_c/windows/system32/"
 ```
 
-### Installing the DXVK fork
+### Per Proton-installation setup
+
+For the following section, set `PROTON_PATH` to the path to Proton installation, like:
+
+```bash
+PROTON_PATH=~/.steam/steam/steamapps/common/"Proton - Experimental"
+```
+
+#### Installing the DXVK fork
 
 Overwrite your Proton Experimental installation's DXVK dlls with the just built DLLs.
 
 ```bash
-cp x64/*.dll ~/.steam/steam/steamapps/common/Proton\ -\ Experimental/files/lib64/wine/dxvk
+cp x64/*.dll "$PROTON_PATH/files/lib64/wine/dxvk/"
 ```
 
-### Installing the DXVK-NVAPI fork
+#### Installing the DXVK-NVAPI fork
 
 Overwrite your Proton Experimental installation's DXVK-NVAPI dlls with the just built DLLs.
 
 ```bash
-cp x64/nvapi64.dll ~/.steam/steam/steamapps/common/Proton\ -\ Experimental/files/lib64/wine/nvapi
+cp x64/nvapi64.dll "$PROTON_PATH/files/lib64/wine/nvapi/"
 ```
 
-Now proceed on to [Environment Variables](#environment-variables) and [Configuration Files](#configuration-files).
-
-### Installing the VKD3D-Proton fork
+#### Installing the VKD3D-Proton fork
 
 Overwrite your Proton Experimental installation's VKD3D-Proton dlls with the just built DLLs.
 
 ```bash
-cp x64/*.dll ~/.steam/steam/steamapps/common/Proton\ -\ Experimental/files/lib64/wine/vkd3d-proton/
+cp x64/*.dll "$PROTON_PATH/files/lib64/wine/vkd3d-proton/"
 ```
+
+Now proceed on to [Environment Variables](#environment-variables) and [Configuration Files](#configuration-files).
 
 ## Lutris
 
@@ -110,12 +133,12 @@ To configure environment variables, using `KEY=value` as an example:
 
 - `PROTON_ENABLE_NVAPI=1` (Proton only): Use this to enable DXVK-NVAPI.
 - `DXVK_ENABLE_NVAPI=1` (non-Proton only): Set this to disable DXVK's nvapiHack.
+- `DXVK_NVAPI_USE_LATENCY_MARKERS=0`: Set for games without latency marker instrumentation to enable heuristic frame matching based LFX2.
 
 ### Required (Non-NVIDIA GPUs only)
 
 - `DXVK_NVAPI_DRIVER_VERSION=49729`: Override the driver version as one that has Reflex support.
 - `DXVK_NVAPI_ALLOW_OTHER_DRIVERS=1`: Enable NVAPI usage with non-NVIDIA GPUs.
-- `DXVK_NVAPI_USE_LATENCY_MARKERS=0`: Set for games without latency marker instrumentation to enable heuristic frame matching based LFX2.
 
 ### Diagnostics
 
