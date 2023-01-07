@@ -5,3 +5,9 @@
 .VPDoc.has-aside .content-container {
     max-width: 1024px !important;
 }
+
+html:not(.dark) {
+    --vp-c-text-dark-3: #ccc;
+    --vp-code-block-bg: rgba(238, 238, 238, 0.5);
+    --vp-code-line-highlight-color: rgba(238, 238, 238, 1);
+}

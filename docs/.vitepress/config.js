@@ -26,4 +26,10 @@ export default defineConfig({
       { icon: 'github', link: 'https://github.com/ishitatsuyuki/latencyflex2' },
     ],
   },
+  markdown: {
+    theme: {
+      light: 'github-light',
+      dark: 'github-dark',
+    },
+  },
 })
