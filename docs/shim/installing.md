@@ -114,7 +114,8 @@ To configure environment variables, using `KEY=value` as an example:
 ### Required (Non-NVIDIA GPUs only)
 
 - `DXVK_NVAPI_DRIVER_VERSION=49729`: Override the driver version as one that has Reflex support.
-- `DXVK_NVAPI_ALLOW_OTHER_DRIVERS`: Enable NVAPI usage with non-NVIDIA GPUs.
+- `DXVK_NVAPI_ALLOW_OTHER_DRIVERS=1`: Enable NVAPI usage with non-NVIDIA GPUs.
+- `DXVK_NVAPI_USE_LATENCY_MARKERS=0`: Set for games without latency marker instrumentation to enable heuristic frame matching based LFX2.
 
 ### Diagnostics
 
