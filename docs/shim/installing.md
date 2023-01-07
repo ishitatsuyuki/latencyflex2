@@ -40,6 +40,14 @@ cp x64/nvapi64.dll ~/.steam/steam/steamapps/common/Proton\ -\ Experimental/files
 
 Now proceed on to [Environment Variables](#environment-variables) and [Configuration Files](#configuration-files).
 
+### Installing the VKD3D-Proton fork
+
+Overwrite your Proton Experimental installation's VKD3D-Proton dlls with the just built DLLs.
+
+```bash
+cp x64/*.dll ~/.steam/steam/steamapps/common/Proton\ -\ Experimental/files/lib64/wine/vkd3d-proton/
+```
+
 ## Lutris
 
 ### Prerequisite
@@ -78,6 +86,17 @@ cp -r x32 x64 ~/.local/share/lutris/runtime/dxvk-nvapi/lfx2/
 ```
 
 Then **Right Click** the game, go to **Configure** → **Runner Options** → **DXVK-NVAPI version** and manually type in "lfx2".
+
+### Installing the VKD3D-Proton fork
+
+Create a new VKD3D-Proton runtime for Lutris with the just built DXVK artifacts.
+
+```bash
+mkdir -p ~/.local/share/lutris/runtime/vkd3d/lfx2/
+cp -r x32 x64 ~/.local/share/lutris/runtime/vkd3d/lfx2/
+```
+
+Then **Right Click** the game, go to **Configure** → **Runner Options** → **VKD3D version** and manually type in "lfx2".
 
 Now proceed on to [Environment Variables](#environment-variables) and [Configuration Files](#configuration-files).
 

@@ -52,3 +52,17 @@ git clone --recursive https://github.com/ishitatsuyuki/dxvk-nvapi.git -b lfx2
 ```
 
 Then follow the upstream [build instructions](https://github.com/jp7677/dxvk-nvapi#how-to-build).
+
+## Compiling the VKD3D-Proton fork
+
+Clone the fork and checkout the `lfx2` branch:
+
+```bash
+git clone --recursive https://github.com/ishitatsuyuki/vkd3d-proton.git -b lfx2
+```
+
+Then follow the upstream [build instructions](https://github.com/HansKristian-Work/vkd3d-proton#building-vkd3d-proton).
+
+## Note on rebases
+
+The forks are rebased regularly on top of upstream changes. When updating, do not use `git pull` as this may result in conflicts. Instead, use `git fetch origin && git reset --hard origin/lfx2`. 
