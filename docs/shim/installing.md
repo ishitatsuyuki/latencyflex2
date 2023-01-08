@@ -133,7 +133,7 @@ To configure environment variables, using `KEY=value` as an example:
 
 - `PROTON_ENABLE_NVAPI=1` (Proton only): Use this to enable DXVK-NVAPI.
 - `DXVK_ENABLE_NVAPI=1` (non-Proton only): Set this to disable DXVK's nvapiHack.
-- `DXVK_NVAPI_USE_LATENCY_MARKERS=0`: Set for games without latency marker instrumentation to enable heuristic frame matching based LFX2.
+- `DXVK_NVAPI_USE_LATENCY_MARKERS=0`: Set to use no-latency-markers mode (see [Enabling or disabling explicit latency markers](#enabling-or-disabling-explicit-latency-markers))
 
 ### Required (Non-NVIDIA GPUs only)
 
@@ -149,3 +149,26 @@ To configure environment variables, using `KEY=value` as an example:
 ### Required (Non-NVIDIA GPUs only)
 
 Put `dxgi.customVendorId = 10de` in `dxvk.conf` to allow NVAPI usage with non-NVIDIA GPUs.
+
+## Enabling or disabling explicit latency markers
+
+Before LFX2 can work with the game, you need to determine whether the game uses explicit latency markers or not.
+
+Configure LFX2 per the steps above, and include `DXVK_NVAPI_LOG_LEVEL=info` in the environment. Now launch the game, and go to the settings to enable Reflex.
+
+If Reflex was successfully enabled and logging is also working, you should see something like below in the log:
+
+```
+NvAPI_D3D_SetSleepMode (Enabled/0us): OK
+```
+
+If you don't see this, the configuration might be incorrect.
+
+Next, check whether the following lines exist in the log:
+
+```
+NvAPI_D3D_SetLatencyMarker: OK
+```
+
+- If the line appears, the game supports latency markers. You do not need to do any additional configuration.
+- If the line doesn't appear, the game does not support latency markers. Set `DXVK_NVAPI_USE_LATENCY_MARKERS=0` in the environment and re-launch the game.
