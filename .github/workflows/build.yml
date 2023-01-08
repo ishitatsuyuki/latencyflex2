@@ -29,3 +29,6 @@ jobs:
       - name: Build
         run: cargo build --release
         working-directory: ./core
+      - name: Test
+        run: cargo test --release
+        working-directory: ./core

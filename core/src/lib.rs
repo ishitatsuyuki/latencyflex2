@@ -15,8 +15,6 @@ mod dx12;
 mod entrypoint;
 mod ewma;
 mod profiler;
-#[cfg_attr(unix, path = "time/unix.rs")]
-#[cfg_attr(windows, path = "time/windows.rs")]
 mod time;
 
 type SectionId = u32;
