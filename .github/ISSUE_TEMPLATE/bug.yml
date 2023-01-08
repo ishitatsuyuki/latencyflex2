@@ -1,0 +1,44 @@
+name: Bug Report
+description: File a bug report
+title: "Title"
+labels: ["bug"]
+body:
+  - type: input
+    id: lfx-commit
+    attributes:
+      label: LFX2 commit
+      description: Which commit of https://github.com/ishitatsuyuki/latencyflex2 are you running?
+    validations:
+      required: true
+  - type: input
+    id: dxvk-commit
+    attributes:
+      label: DXVK commit
+      description: Which commit of https://github.com/ishitatsuyuki/dxvk are you running?
+    validations:
+      required: true
+  - type: input
+    id: nvapi-commit
+    attributes:
+      label: NVAPI commit
+      description: Which commit of https://github.com/ishitatsuyuki/dxvk-nvapi are you running?
+    validations:
+      required: true
+  - type: input
+    id: vkd3d-commit
+    attributes:
+      label: VKD3D-Proton commit
+      description: Which commit of https://github.com/ishitatsuyuki/vkd3d-proton are you running? (DX12 games only)
+  - type: input
+    id: game
+    attributes:
+      label: Game
+      description: Game name (if relevant)
+  - type: textarea
+    id: description
+    attributes:
+      label: Issue Description
+      description: |
+        Describe the issue you're seeing below.
+        Include log files (PROTON_LOG, Lutris logs, etc.).
+        For frame time issues, please compress and upload the profile files (e.g. lfx2.2023.01.01-00.00.00.json) from your game folder.
