@@ -116,7 +116,7 @@ Create a new VKD3D-Proton runtime for Lutris with the just built DXVK artifacts.
 
 ```bash
 mkdir -p ~/.local/share/lutris/runtime/vkd3d/lfx2/
-cp -r x32 x64 ~/.local/share/lutris/runtime/vkd3d/lfx2/
+cp -r x64 x86 ~/.local/share/lutris/runtime/vkd3d/lfx2/
 ```
 
 Then **Right Click** the game, go to **Configure** → **Runner Options** → **VKD3D version** and manually type in "lfx2".
