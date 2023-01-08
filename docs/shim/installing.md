@@ -90,7 +90,7 @@ cp target/x86_64-pc-windows-gnu/release/latencyflex2_rust.dll ~/Games/<game>/dri
 
 ### Installing the DXVK fork
 
-Create a new DXVK runtime for Lutris with the just built DXVK artifacts.
+Create a new DXVK runtime for Lutris with the just built artifacts.
 
 ```bash
 mkdir -p ~/.local/share/lutris/runtime/dxvk/lfx2/
@@ -101,7 +101,7 @@ Then **Right Click** the game, go to **Configure** → **Runner Options** → **
 
 ### Installing the DXVK-NVAPI fork
 
-Create a new DXVK-NVAPI runtime for Lutris with the just built DXVK artifacts.
+Create a new DXVK-NVAPI runtime for Lutris with the just built artifacts.
 
 ```bash
 mkdir -p ~/.local/share/lutris/runtime/dxvk-nvapi/lfx2/
@@ -112,7 +112,7 @@ Then **Right Click** the game, go to **Configure** → **Runner Options** → **
 
 ### Installing the VKD3D-Proton fork
 
-Create a new VKD3D-Proton runtime for Lutris with the just built DXVK artifacts.
+Create a new VKD3D-Proton runtime for Lutris with the just built artifacts.
 
 ```bash
 mkdir -p ~/.local/share/lutris/runtime/vkd3d/lfx2/
