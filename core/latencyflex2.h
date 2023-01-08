@@ -16,12 +16,14 @@
 #define LFX2_API
 #endif
 
+#ifdef LFX2_DX12
 typedef struct lfx2Dx12SubmitAux {
     ID3D12GraphicsCommandList* executeBefore;
     ID3D12GraphicsCommandList* executeAfter;
     ID3D12Fence* fence;
     uint64_t fenceValue;
 } lfx2Dx12SubmitAux;
+#endif
 
 
 typedef enum lfx2MarkType {
