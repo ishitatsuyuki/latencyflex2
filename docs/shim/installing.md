@@ -94,10 +94,16 @@ Create a new DXVK runtime for Lutris with the just built artifacts.
 
 ```bash
 mkdir -p ~/.local/share/lutris/runtime/dxvk/lfx2/
-cp -r x32 x64 ~/.local/share/lutris/runtime/dxvk/lfx2/
+cp -r x64 ~/.local/share/lutris/runtime/dxvk/lfx2/
 ```
 
-Then **Right Click** the game, go to **Configure** → **Runner Options** → **DXVK version** and manually type in "lfx2". 
+Then **Right Click** the game, go to **Configure** → **Runner Options** → **DXVK version** and manually type in "lfx2".
+
+::: info
+
+If you need the 32-bit version of DXVK, please copy it from another upstream build of DXVK. The DXVK fork will crash on startup if LFX2 cannot be loaded, which is the case for 32-bit since we don't install 32-bit LFX2 modules.
+
+:::
 
 ### Installing the DXVK-NVAPI fork
 
@@ -105,7 +111,7 @@ Create a new DXVK-NVAPI runtime for Lutris with the just built artifacts.
 
 ```bash
 mkdir -p ~/.local/share/lutris/runtime/dxvk-nvapi/lfx2/
-cp -r x32 x64 ~/.local/share/lutris/runtime/dxvk-nvapi/lfx2/
+cp -r x64 ~/.local/share/lutris/runtime/dxvk-nvapi/lfx2/
 ```
 
 Then **Right Click** the game, go to **Configure** → **Runner Options** → **DXVK-NVAPI version** and manually type in "lfx2".
@@ -116,7 +122,7 @@ Create a new VKD3D-Proton runtime for Lutris with the just built artifacts.
 
 ```bash
 mkdir -p ~/.local/share/lutris/runtime/vkd3d/lfx2/
-cp -r x64 x86 ~/.local/share/lutris/runtime/vkd3d/lfx2/
+cp -r x64 ~/.local/share/lutris/runtime/vkd3d/lfx2/
 ```
 
 Then **Right Click** the game, go to **Configure** → **Runner Options** → **VKD3D version** and manually type in "lfx2".
