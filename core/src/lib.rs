@@ -175,11 +175,6 @@ impl ContextInner {
                 let optimal_latency = real_latency.saturating_sub(queueing_delay);
                 self.optimal_latency_estimator
                     .update(cmp::min(optimal_latency, MAX_LATENCY) as f64);
-                dbg!(
-                    real_latency,
-                    optimal_latency,
-                    self.optimal_latency_estimator.get()
-                );
             }
 
             for (section_id, duration) in frame.inverse_throughput().into_iter() {

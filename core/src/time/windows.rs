@@ -69,8 +69,6 @@ pub fn sleep_until(target: Timestamp) {
     const MIN_SPIN_PERIOD: u64 = 500_000;
     let mut now = timestamp_now();
 
-    eprintln!("LFX2 Sleep: {}us", target.saturating_sub(now) / 1000);
-
     while now + MIN_SPIN_PERIOD < target {
         let sleep_duration = -((target - now - MIN_SPIN_PERIOD) as i64) / 100;
         TIMER.with(|timer| unsafe {
@@ -86,6 +84,4 @@ pub fn sleep_until(target: Timestamp) {
         hint::spin_loop();
         now = timestamp_now();
     }
-
-    eprintln!("LFX2 Sleep excess: {}us", now.saturating_sub(target) / 1000);
 }
