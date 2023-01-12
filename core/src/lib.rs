@@ -114,7 +114,7 @@ impl ContextInner {
 
         let last_frame_top = self.frames_iter().next_back().map(|f| f.predicted_begin);
         if let Some(last_frame_top) = last_frame_top {
-            let top_interval = target - last_frame_top;
+            let top_interval = target.saturating_sub(last_frame_top);
             if let Some(target_top_frame_time) = self.target_top_frame_time {
                 let target_top_frame_time = target_top_frame_time.clamp(1_000_000, 100_000_000);
                 const HALF_LIFE: f64 = 100_000_000.;
