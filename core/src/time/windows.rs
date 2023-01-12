@@ -70,7 +70,7 @@ pub fn sleep_until(target: Timestamp) {
     let mut now = timestamp_now();
 
     while now + MIN_SPIN_PERIOD < target {
-        let sleep_duration = -((target - now - MIN_SPIN_PERIOD) as i64) / 100;
+        let sleep_duration = -((target - now - MIN_SPIN_PERIOD) as i64 + 99) / 100;
         TIMER.with(|timer| unsafe {
             SetWaitableTimer(timer.0, &sleep_duration, 0, None, None, false)
                 .ok()
