@@ -1,14 +1,17 @@
 use std::hint;
+use std::mem;
 use std::num::NonZeroU64;
 
 use once_cell::sync::Lazy;
-use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, BOOLEAN, HANDLE, NTSTATUS};
+use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
 use windows::Win32::System::Threading::{
     CreateWaitableTimerExW, SetWaitableTimer, WaitForSingleObject,
     CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS,
 };
 use windows::Win32::System::WindowsProgramming::INFINITE;
+use windows::{s, w};
 
 use crate::Timestamp;
 
@@ -65,18 +68,35 @@ thread_local! {
     static TIMER: WaitableTimer = WaitableTimer::new();
 }
 
+static NT_DELAY_EXECUTION: Lazy<Option<extern "system" fn(BOOLEAN, *const i64) -> NTSTATUS>> =
+    Lazy::new(|| unsafe {
+        let ntdll = GetModuleHandleW(w!("ntdll.dll")).ok()?;
+        let wine = GetProcAddress(ntdll, s!("wine_get_version")).is_some();
+        if !wine {
+            return None;
+        }
+        let delay_execution = GetProcAddress(ntdll, s!("NtDelayExecution"))?;
+        Some(mem::transmute(delay_execution))
+    });
+
 pub fn sleep_until(target: Timestamp) {
     const MIN_SPIN_PERIOD: u64 = 500_000;
     let mut now = timestamp_now();
 
     while now + MIN_SPIN_PERIOD < target {
         let sleep_duration = -((target - now - MIN_SPIN_PERIOD) as i64 + 99) / 100;
-        TIMER.with(|timer| unsafe {
-            SetWaitableTimer(timer.0, &sleep_duration, 0, None, None, false)
-                .ok()
-                .unwrap();
-            WaitForSingleObject(timer.0, INFINITE).ok().unwrap();
-        });
+        if let Some(delay_execution) = *NT_DELAY_EXECUTION {
+            unsafe {
+                delay_execution(false.into(), &sleep_duration).ok().unwrap();
+            }
+        } else {
+            TIMER.with(|timer| unsafe {
+                SetWaitableTimer(timer.0, &sleep_duration, 0, None, None, false)
+                    .ok()
+                    .unwrap();
+                WaitForSingleObject(timer.0, INFINITE).ok().unwrap();
+            });
+        }
         now = timestamp_now();
     }
 
