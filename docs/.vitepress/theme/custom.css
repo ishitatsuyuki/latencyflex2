@@ -11,3 +11,9 @@ html:not(.dark) {
     --vp-code-block-bg: rgba(238, 238, 238, 0.5);
     --vp-code-line-highlight-color: rgba(238, 238, 238, 1);
 }
+
+input {
+    border: 1px solid var(--vp-c-divider);
+    border-radius: 4px;
+    padding: 1px 4px;
+}
