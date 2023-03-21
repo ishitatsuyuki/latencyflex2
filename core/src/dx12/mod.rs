@@ -40,7 +40,6 @@ struct Dx12ContextInner {
     fence_value: u64,
 }
 
-/// cbindgen:ignore
 #[repr(C)]
 #[derive(Default)]
 pub struct Dx12SubmitAux {

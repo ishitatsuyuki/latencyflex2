@@ -4,7 +4,7 @@ use std::thread::sleep;
 
 use chrono::Local;
 
-use crate::{FrameId, MarkType, SectionId, Timestamp};
+use crate::{FrameId, Interval, MarkType, SectionId, Timestamp};
 
 pub struct Profiler {
     output: BufWriter<File>,
@@ -55,6 +55,57 @@ impl Profiler {
             self.output,
             r#"{comma}  {{"name": "{name}", "cat": "MARKER", "ph": "{ph}", "pid": 1, "tid": {tid}, "ts": {ts}}}"#
         );
-        let _ = self.output.flush();
+    }
+
+    pub fn latency(
+        &mut self,
+        frame_id: FrameId,
+        latency: Interval,
+        queueing_delay: Interval,
+        finish_time: Timestamp,
+    ) {
+        let ts = finish_time / 1000;
+        let comma = if self.is_first_mark { "" } else { ",\n" };
+        self.is_first_mark = false;
+        let _ = write!(
+            self.output,
+            r#"{comma}  {{"name": "Latency", "cat": "LATENCY", "ph": "C", "pid": 1, "tid": "10000", "ts": {ts}, "args": {{"latency": {latency}, "queueing_delay": {queueing_delay}}}}}"#
+        );
+    }
+
+    pub fn frame_time(
+        &mut self,
+        frame_id: FrameId,
+        top_interval: Interval,
+        bop_interval: Interval,
+        finish_time: Timestamp,
+    ) {
+        let name = frame_id.0;
+        let ts = finish_time / 1000;
+        let comma = if self.is_first_mark { "" } else { ",\n" };
+        self.is_first_mark = false;
+        let _ = write!(
+            self.output,
+            r#"{comma}  {{"name": "Frame Time", "cat": "LATENCY", "ph": "C", "pid": 1, "tid": "10000", "ts": {ts}, "args": {{"top_interval": {top_interval}, "bop_interval": {bop_interval}}}}}"#
+        );
+    }
+    
+    pub fn sleep(
+        &mut self,
+        frame_id: FrameId,
+        start_time: Timestamp,
+        end_time: Timestamp,
+    ) {
+        let name = "Sleep";
+        let tid = 9999;
+        let start = start_time / 1000;
+        let end = end_time / 1000;
+        let comma = if self.is_first_mark { "" } else { ",\n" };
+        self.is_first_mark = false;
+        let _ = write!(
+            self.output,
+            r#"{comma}  {{"name": "{name}", "cat": "MARKER", "ph": "B", "pid": 1, "tid": {tid}, "ts": {start}}},
+              {{"name": "{name}", "cat": "MARKER", "ph": "E", "pid": 1, "tid": {tid}, "ts": {end}}}"#
+        );
     }
 }

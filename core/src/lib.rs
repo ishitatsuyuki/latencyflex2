@@ -1,5 +1,4 @@
 use parking_lot::Mutex;
-use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Once, Weak};
@@ -14,15 +13,18 @@ use crate::time::*;
 mod dx12;
 mod entrypoint;
 mod ewma;
+mod fence_worker;
 mod profiler;
 mod time;
+#[cfg(feature = "vulkan")]
+mod vulkan;
 
 type SectionId = u32;
 type Timestamp = u64;
 type Interval = u64;
 
 #[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
-struct FrameId(u64);
+pub struct FrameId(u64);
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
@@ -72,6 +74,10 @@ struct FrameImpl {
     predicted_begin: u64,
     predicted_duration: u64,
     marks: BTreeMap<(SectionId, MarkType), Timestamp>,
+
+    // Overrides
+    inverse_throughput: BTreeMap<SectionId, Interval>,
+    queueing_delay: BTreeMap<SectionId, Interval>,
 }
 
 impl ContextInner {
@@ -142,6 +148,8 @@ impl ContextInner {
                 predicted_begin: target,
                 predicted_duration,
                 marks: Default::default(),
+                inverse_throughput: Default::default(),
+                queueing_delay: Default::default(),
             },
         );
 
@@ -152,6 +160,8 @@ impl ContextInner {
                 eprintln!("LFX2 WARN: More than {LEAK_WARN_THRESHOLD} frames in flight. Did you forget to call lfx2FrameRelease()?");
             });
         }
+
+        self.profiler.sleep(id, now, target);
 
         (handle, target)
     }
@@ -165,7 +175,7 @@ impl ContextInner {
                 break;
             }
 
-            let frame = first.remove_entry().1;
+            let (frame_id, frame) = first.remove_entry();
 
             if let Some(reference_frame) = &self.reference_frame {
                 let queueing_delay = frame.queueing_delay(reference_frame);
@@ -175,9 +185,24 @@ impl ContextInner {
                 let optimal_latency = real_latency.saturating_sub(queueing_delay);
                 self.optimal_latency_estimator
                     .update(cmp::min(optimal_latency, MAX_LATENCY) as f64);
+
+                self.profiler
+                    .latency(frame_id, real_latency, queueing_delay, frame.end_ts());
+
+                self.profiler.frame_time(
+                    frame_id,
+                    frame.begin_ts() - reference_frame.begin_ts(),
+                    frame.end_ts() - reference_frame.end_ts(),
+                    frame.end_ts(),
+                );
             }
 
             for (section_id, duration) in frame.inverse_throughput().into_iter() {
+                let duration = frame
+                    .inverse_throughput
+                    .get(&section_id)
+                    .map(|x| *x)
+                    .unwrap_or(duration);
                 self.bandwidth_estimator
                     .entry(section_id)
                     .or_insert_with(|| EwmaEstimator::new(0.5))
@@ -200,6 +225,24 @@ impl Frame {
         inner
             .profiler
             .mark(self.id, section_id, mark_type, timestamp);
+    }
+
+    fn set_inv_throughput(&self, section_id: SectionId, inv_throughput: Interval) {
+        let mut inner = self.context.inner.lock();
+        inner
+            .frames
+            .get_mut(&self.id)
+            .unwrap()
+            .set_inv_throughput(section_id, inv_throughput);
+    }
+
+    fn set_queueing_delay(&self, section_id: SectionId, queueing_delay: Interval) {
+        let mut inner = self.context.inner.lock();
+        inner
+            .frames
+            .get_mut(&self.id)
+            .unwrap()
+            .set_queueing_delay(section_id, queueing_delay);
     }
 }
 
@@ -232,13 +275,21 @@ impl FrameImpl {
         self.marks.insert((section_id, mark_type), timestamp);
     }
 
+    fn set_inv_throughput(&mut self, section_id: SectionId, duration: Interval) {
+        self.inverse_throughput.insert(section_id, duration);
+    }
+
+    fn set_queueing_delay(&mut self, section_id: SectionId, queueing_delay: Interval) {
+        self.queueing_delay.insert(section_id, queueing_delay);
+    }
+
     fn queueing_delay(&self, reference: &FrameImpl) -> u64 {
         let ends = filter_marks_by_type(&self.marks, MarkType::End);
         let last_ends = filter_marks_by_type(&reference.marks, MarkType::End);
         let mut delays = Vec::new();
         for (section_id, handoff_time) in ends {
-            if section_id == 0 {
-                delays.push(0);
+            if let Some(&delay) = self.queueing_delay.get(&section_id) {
+                delays.push(delay);
                 continue;
             }
             let stage_after_idx =
@@ -255,6 +306,10 @@ impl FrameImpl {
         let ends = filter_marks_by_type(&self.marks, MarkType::End);
         ends.into_iter()
             .filter_map(|(section_id, timestamp)| {
+                if let Some(&duration) = self.inverse_throughput.get(&section_id) {
+                    return Some((section_id, duration));
+                }
+
                 let other_timestamp_idx = begins.binary_search_by_key(&section_id, |&(id, _)| id);
                 if let Ok(other_timestamp_idx) = other_timestamp_idx {
                     let (_, other_timestamp) = begins[other_timestamp_idx];

@@ -1,5 +1,5 @@
 use crate::time::{sleep_until, timestamp_now};
-use crate::{Context, Frame, ImplicitContext, MarkType, SectionId, Timestamp};
+use crate::{Context, Frame, ImplicitContext, Interval, MarkType, SectionId, Timestamp};
 use std::ptr::NonNull;
 use std::sync::Arc;
 
@@ -65,6 +65,24 @@ pub unsafe extern "C" fn lfx2MarkSection(
     timestamp: Timestamp,
 ) {
     (*frame).mark(section_id, mark_type, timestamp);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn lfx2FrameOverrideQueuingDelay(
+    frame: *mut Frame,
+    section_id: SectionId,
+    queueing_delay: Interval,
+) {
+    (*frame).set_queueing_delay(section_id, queueing_delay);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn lfx2FrameOverrideInverseThroughput(
+    frame: *mut Frame,
+    section_id: SectionId,
+    inverse_throughput: Interval,
+) {
+    (*frame).set_inv_throughput(section_id, inverse_throughput);
 }
 
 #[no_mangle]
