@@ -9,8 +9,10 @@ editLink: true
 
 ### Prerequisite
 
+Your Proton installation should be new enough to contain a [fix](https://github.com/ValveSoftware/wine/pull/171) for GPU timestamps. If you're using one of the Proton distributions below, the requirements are:
+
 - **Proton Experimental (Bleeding Edge)**: 7.0-32084-20221229 or later  
-  A new version is required due to a [bug](https://github.com/ValveSoftware/wine/pull/171) that resulted in GPU timestamps to have drifted values.
+- **Proton-GE**: GE-Proton7-44 or later
 
 ### Overview
 
@@ -76,9 +78,9 @@ Now proceed on to [Environment Variables](#environment-variables) and [Configura
 ### Prerequisite
 
 - Wine upstream: 7.0 or later
-- Wine-GE: Wine-GE-Proton7-33 **with binary patching** for GPU timestamp [bug](https://github.com/ValveSoftware/wine/pull/171)  
-  Open `lib64/wine/x86_64-unix/winevulkan.so` and replace `be02000000` at offset 0x194a6 with `be01000000`.  
-  Caution: The offsets only works for **Wine-GE-Proton7-33**!
+- Wine-GE: GE-Proton7-36 or later
+
+For trees based on Proton branches, it is necessary that the [fix](https://github.com/ValveSoftware/wine/pull/171) for GPU timestamps is included.
 
 ### Installing the core module
 
