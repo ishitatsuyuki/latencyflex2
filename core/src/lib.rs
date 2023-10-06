@@ -42,9 +42,8 @@ struct ContextInner {
     next_frame_id: FrameId,
     frames: BTreeMap<FrameId, FrameImpl>,
     reference_frame: Option<FrameImpl>,
-    optimal_latency_estimator: EwmaEstimator,
+    reference_delay: Option<i64>,
     bandwidth_estimator: BTreeMap<SectionId, EwmaEstimator>,
-    target_top_frame_time: Option<u64>,
 
     profiler: Profiler,
 }
@@ -55,10 +54,9 @@ impl Default for ContextInner {
             next_frame_id: FrameId(0),
             frames: BTreeMap::new(),
             reference_frame: None,
-            optimal_latency_estimator: EwmaEstimator::new(0.5),
+            reference_delay: None,
             bandwidth_estimator: BTreeMap::new(),
             profiler: Profiler::new(),
-            target_top_frame_time: None,
         }
     }
 }
@@ -72,7 +70,7 @@ pub struct Frame {
 struct FrameImpl {
     writer: Weak<Frame>,
     predicted_begin: u64,
-    predicted_duration: u64,
+    predicted_error_delta: i64,
     marks: BTreeMap<(SectionId, MarkType), Timestamp>,
 
     // Overrides
@@ -81,59 +79,52 @@ struct FrameImpl {
 }
 
 impl ContextInner {
-    fn frames_iter(&self) -> impl DoubleEndedIterator<Item = &FrameImpl> {
-        self.reference_frame.iter().chain(self.frames.values())
+    fn alpha(&self) -> f64 {
+        0.15
     }
 
-    fn last_predicted_frame_end(&self) -> Option<Timestamp> {
-        self.reference_frame.as_ref().map(|reference_frame| {
-            reference_frame.end_ts()
-                + self
-                    .frames
-                    .iter()
-                    .map(|(_, frame)| frame.predicted_duration)
-                    .sum::<u64>()
-        })
+    fn beta(&self) -> f64 {
+        0.3
+    }
+
+    fn frames_iter(&self) -> impl DoubleEndedIterator<Item = &FrameImpl> {
+        self.reference_frame.iter().chain(self.frames.values())
     }
 
     fn prepare_frame(&mut self, context: Arc<Context>) -> (Arc<Frame>, Timestamp) {
         self.update_estimates();
 
+        let bias = 2_000_000;
+        let error = if let Some(actual) = self.reference_delay {
+            self.frames.iter().fold(actual, |acc, (_, frame)| {
+                (acc + frame.predicted_error_delta).max(0)
+            }) - bias
+        } else {
+            0
+        };
+
+        let clamped_error = error.clamp(-25_000_000, 25_000_000);
+
+        let now = timestamp_now();
         let predicted_duration = self
             .bandwidth_estimator
             .iter()
             .map(|(_, e)| e.get() as u64)
             .max()
             .unwrap_or(0);
-
-        let bias = 1000000;
-        let now = timestamp_now();
-        let mut target = self
-            .last_predicted_frame_end()
-            .map(|predicted_frame_end| {
-                predicted_frame_end + predicted_duration
-                    - self.optimal_latency_estimator.get() as u64
-                    - bias
-            })
-            .unwrap_or(now)
-            .max(now);
+        let mut predicted_error_delta = -(self.alpha() * clamped_error as f64) as i64;
+        let target_frame_time = (predicted_duration as i64 - predicted_error_delta) as u64;
 
         let last_frame_top = self.frames_iter().next_back().map(|f| f.predicted_begin);
+        let mut target;
         if let Some(last_frame_top) = last_frame_top {
-            let top_interval = target.saturating_sub(last_frame_top);
-            if let Some(target_top_frame_time) = self.target_top_frame_time {
-                let target_top_frame_time = target_top_frame_time.clamp(1_000_000, 100_000_000);
-                const HALF_LIFE: f64 = 100_000_000.;
-                let tolerance = 2f64.powf(target_top_frame_time as f64 / HALF_LIFE);
-                let inv_tolerance = 2f64.powf(-(target_top_frame_time as f64) / HALF_LIFE);
-                let max = (tolerance * target_top_frame_time as f64) as u64;
-                let min = (inv_tolerance * target_top_frame_time as f64) as u64;
-                let new_target_frame_time = top_interval.clamp(min, max);
-                target = (last_frame_top + new_target_frame_time).max(now);
-                self.target_top_frame_time = Some(new_target_frame_time);
-            } else {
-                self.target_top_frame_time = Some(top_interval);
+            target = last_frame_top + target_frame_time;
+            if let Some(overdue) = now.checked_sub(last_frame_top + target_frame_time) {
+                target = now;
+                predicted_error_delta -= overdue as i64;
             }
+        } else {
+            target = now;
         }
 
         let id = self.next_frame_id;
@@ -146,7 +137,7 @@ impl ContextInner {
             FrameImpl {
                 writer: Arc::downgrade(&handle),
                 predicted_begin: target,
-                predicted_duration,
+                predicted_error_delta,
                 marks: Default::default(),
                 inverse_throughput: Default::default(),
                 queueing_delay: Default::default(),
@@ -181,10 +172,8 @@ impl ContextInner {
                 let queueing_delay = frame.queueing_delay(reference_frame);
                 // Should not overflow, but for sanity
                 let real_latency = frame.end_ts().saturating_sub(frame.begin_ts());
-                // Again, should not overflow, but for sanity
-                let optimal_latency = real_latency.saturating_sub(queueing_delay);
-                self.optimal_latency_estimator
-                    .update(cmp::min(optimal_latency, MAX_LATENCY) as f64);
+
+                self.reference_delay = Some(queueing_delay as i64);
 
                 self.profiler
                     .latency(frame_id, real_latency, queueing_delay, frame.end_ts());
@@ -203,9 +192,10 @@ impl ContextInner {
                     .get(&section_id)
                     .map(|x| *x)
                     .unwrap_or(duration);
+                let beta = self.beta();
                 self.bandwidth_estimator
                     .entry(section_id)
-                    .or_insert_with(|| EwmaEstimator::new(0.5))
+                    .or_insert_with(|| EwmaEstimator::new(beta))
                     .update(cmp::min(duration, MAX_FRAME_TIME) as f64);
             }
 

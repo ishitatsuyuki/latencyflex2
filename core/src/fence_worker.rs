@@ -86,10 +86,11 @@ impl<S, F: FnMut(S) -> (Timestamp, Timestamp, Timestamp)> FenceWorker<S, F> {
                                 .unwrap_or(queueing_delay),
                         );
 
-                        let duration = end_ts.saturating_sub(begin_ts);
+                        let duration = end_ts.saturating_sub(self.last_finish.max(submission_ts));
                         tr.duration += duration;
+
+                        self.last_finish = end_ts;
                     }
-                    self.last_finish = end_ts;
                 }
                 FenceWorkerMessage::EndFrame(frame) => {
                     let tracker = self.tracker.take().unwrap();
