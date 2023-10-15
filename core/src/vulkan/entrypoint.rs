@@ -29,15 +29,15 @@ pub unsafe extern "C" fn lfx2VulkanContextCreate(
         .collect::<Vec<_>>();
     let stub_device_create_info =
         vk::DeviceCreateInfo::builder().pp_enabled_extension_names(&device_extension_names);
-    let device = Device::new(
-        loader,
-        instance,
-        &stub_instance_create_info,
-        physical_device,
+    let instance = spark::Instance::load(&loader, instance, &stub_instance_create_info).unwrap();
+    let device = spark::Device::load(
+        &instance,
         device,
         &stub_device_create_info,
-        queue_family_index,
-    );
+        vk::Version::from_raw_parts(1, 3, 0),
+    )
+    .unwrap();
+    let device = Device::new(instance, physical_device, device, queue_family_index);
     let context = VulkanContext::new(device).unwrap();
     Arc::into_raw(context) as _
 }

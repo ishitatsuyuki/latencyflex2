@@ -22,24 +22,12 @@ struct Device {
 
 impl Device {
     fn new(
-        static_fn: spark::Loader,
-        instance: vk::Instance,
-        instance_create_info: &vk::InstanceCreateInfo,
+        instance: spark::Instance,
         phys_device: vk::PhysicalDevice,
-        device: vk::Device,
-        device_create_info: &vk::DeviceCreateInfo,
+        device: spark::Device,
         queue_family_index: u32,
     ) -> Arc<Device> {
         unsafe {
-            let instance =
-                spark::Instance::load(&static_fn, instance, instance_create_info).unwrap();
-            let device = spark::Device::load(
-                &instance,
-                device,
-                device_create_info,
-                vk::Version::from_raw_parts(1, 3, 0),
-            )
-            .unwrap();
             let limits = instance.get_physical_device_properties(phys_device).limits;
             let queue_family_properties = instance
                 .get_physical_device_queue_family_properties_to_vec(phys_device)
