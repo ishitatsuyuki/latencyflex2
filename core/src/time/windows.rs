@@ -2,8 +2,9 @@ use std::hint;
 use std::mem;
 use std::num::NonZeroU64;
 
-use ash::vk;
 use once_cell::sync::Lazy;
+#[cfg(feature = "vulkan")]
+use spark::vk;
 use windows::Win32::Foundation::{CloseHandle, BOOLEAN, HANDLE, NTSTATUS};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
@@ -16,8 +17,9 @@ use windows::{s, w};
 
 use crate::Timestamp;
 
+#[cfg(feature = "vulkan")]
 pub const VULKAN_TIMESTAMP_DOMAIN: vk::TimeDomainEXT = vk::TimeDomainEXT::QUERY_PERFORMANCE_COUNTER;
-
+#[cfg(feature = "vulkan")]
 pub fn timestamp_from_vulkan(calibration: u64) -> u64 {
     timestamp_from_qpc(calibration)
 }

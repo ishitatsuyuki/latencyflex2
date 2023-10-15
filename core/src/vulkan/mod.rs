@@ -1,51 +1,54 @@
-mod entrypoint;
+use std::mem;
+use std::sync::Arc;
+
+use parking_lot::Mutex;
+use spark::vk::{CommandBufferUsageFlags, QueryResultFlags};
+use spark::{vk, Builder};
 
 use crate::fence_worker::{FenceThread, FenceWorkerMessage};
 use crate::time::{timestamp_from_vulkan, timestamp_now, VULKAN_TIMESTAMP_DOMAIN};
 use crate::{Frame, Timestamp};
-use ash::prelude::VkResult;
-use ash::vk;
-use ash::vk::{CommandBufferUsageFlags, QueryResultFlags};
-use parking_lot::Mutex;
-use std::ffi::c_void;
-use std::ptr;
-use std::sync::Arc;
+
+mod entrypoint;
+
+type VkResult<T> = Result<T, vk::Result>;
 
 struct Device {
-    handle: ash::Device,
+    handle: spark::Device,
     limits: vk::PhysicalDeviceLimits,
     queue_family_index: u32,
     queue_family_properties: vk::QueueFamilyProperties,
-    calibrated_timestamps: vk::ExtCalibratedTimestampsFn,
 }
 
 impl Device {
     fn new(
-        static_fn: vk::StaticFn,
+        static_fn: spark::Loader,
         instance: vk::Instance,
+        instance_create_info: &vk::InstanceCreateInfo,
         phys_device: vk::PhysicalDevice,
         device: vk::Device,
+        device_create_info: &vk::DeviceCreateInfo,
         queue_family_index: u32,
     ) -> Arc<Device> {
         unsafe {
-            let instance = ash::Instance::load(&static_fn, instance);
-            let device = ash::Device::load(instance.fp_v1_0(), device);
+            let instance =
+                spark::Instance::load(&static_fn, instance, instance_create_info).unwrap();
+            let device = spark::Device::load(
+                &instance,
+                device,
+                device_create_info,
+                vk::Version::from_raw_parts(1, 3, 0),
+            )
+            .unwrap();
             let limits = instance.get_physical_device_properties(phys_device).limits;
             let queue_family_properties = instance
-                .get_physical_device_queue_family_properties(phys_device)
+                .get_physical_device_queue_family_properties_to_vec(phys_device)
                 [queue_family_index as usize];
-            let calibrated_timestamps = vk::ExtCalibratedTimestampsFn::load(|name| {
-                instance
-                    .get_device_proc_addr(device.handle(), name.as_ptr())
-                    .map(|x| x as *const c_void)
-                    .unwrap_or(ptr::null())
-            });
             Arc::new(Device {
                 handle: device,
                 limits,
                 queue_family_index,
                 queue_family_properties,
-                calibrated_timestamps,
             })
         }
     }
@@ -73,7 +76,9 @@ impl QueryPool {
 impl Drop for QueryPool {
     fn drop(&mut self) {
         unsafe {
-            self.device.handle.destroy_query_pool(self.handle, None);
+            self.device
+                .handle
+                .destroy_query_pool(Some(self.handle), None);
         }
     }
 }
@@ -89,7 +94,7 @@ impl CommandBuffer {
     // TODO: Create a safe wrapper for CommandPool
     fn new(device: Arc<Device>, pool: vk::CommandPool) -> VkResult<Self> {
         let handle = unsafe {
-            device.handle.allocate_command_buffers(
+            device.handle.allocate_command_buffers_to_vec(
                 &vk::CommandBufferAllocateInfo::builder()
                     .command_pool(pool)
                     .command_buffer_count(1),
@@ -174,12 +179,10 @@ impl VulkanContextInner {
 
         let sem = unsafe {
             device.handle.create_semaphore(
-                &vk::SemaphoreCreateInfo::builder()
-                    .push_next(
-                        &mut vk::SemaphoreTypeCreateInfo::builder()
-                            .semaphore_type(vk::SemaphoreType::TIMELINE),
-                    )
-                    .build(),
+                &vk::SemaphoreCreateInfo::builder().insert_next(
+                    &mut vk::SemaphoreTypeCreateInfo::builder()
+                        .semaphore_type(vk::SemaphoreType::TIMELINE),
+                ),
                 None,
             )?
         };
@@ -204,10 +207,10 @@ impl Drop for VulkanContextInner {
         self.query_pool.clear();
 
         unsafe {
-            self.device.handle.destroy_semaphore(self.sem, None);
+            self.device.handle.destroy_semaphore(Some(self.sem), None);
             self.device
                 .handle
-                .destroy_command_pool(self.command_pool, None);
+                .destroy_command_pool(Some(self.command_pool), None);
         }
     }
 }
@@ -263,8 +266,7 @@ impl VulkanContextInner {
                 self.device.handle.begin_command_buffer(
                     command_buffers[i].handle,
                     &vk::CommandBufferBeginInfo::builder()
-                        .flags(CommandBufferUsageFlags::ONE_TIME_SUBMIT)
-                        .build(),
+                        .flags(CommandBufferUsageFlags::ONE_TIME_SUBMIT),
                 )?;
                 self.device.handle.cmd_write_timestamp2(
                     command_buffers[i].handle,
@@ -320,33 +322,23 @@ impl VulkanSubmission {
         }
         unsafe {
             device.handle.wait_semaphores(
-                &vk::SemaphoreWaitInfo::builder()
-                    .semaphores(&[sem])
-                    .values(&[self.seq])
-                    .build(),
+                &vk::SemaphoreWaitInfo::builder().p_semaphores(&[sem], &[self.seq]),
                 u64::MAX,
             )?;
         }
 
         let mut calibration = [0u64; 2];
-        let mut deviation = [0u64; 2];
+        let mut deviation = 0u64;
         let timestamp_info = [
-            vk::CalibratedTimestampInfoEXT::builder()
-                .time_domain(vk::TimeDomainEXT::DEVICE)
-                .build(),
-            vk::CalibratedTimestampInfoEXT::builder()
-                .time_domain(VULKAN_TIMESTAMP_DOMAIN)
-                .build(),
+            *vk::CalibratedTimestampInfoEXT::builder().time_domain(vk::TimeDomainEXT::DEVICE),
+            *vk::CalibratedTimestampInfoEXT::builder().time_domain(VULKAN_TIMESTAMP_DOMAIN),
         ];
         unsafe {
-            (device.calibrated_timestamps.get_calibrated_timestamps_ext)(
-                device.handle.handle(),
-                2,
-                timestamp_info.as_ptr(),
+            device.handle.get_calibrated_timestamps_ext(
+                &timestamp_info,
                 calibration.as_mut_ptr(),
-                deviation.as_mut_ptr(),
-            )
-            .result()?;
+                &mut deviation,
+            )?;
         }
         let process_timestamp = |(pool, index): &(Arc<QueryPool>, u32)| -> VkResult<u64> {
             let mut gpu_ts = [0u64; 1];
@@ -356,7 +348,8 @@ impl VulkanSubmission {
                     *index,
                     1,
                     &mut gpu_ts,
-                    QueryResultFlags::TYPE_64 | QueryResultFlags::WAIT,
+                    mem::size_of::<u64>() as _,
+                    QueryResultFlags::N64 | QueryResultFlags::WAIT,
                 )?;
             }
             let gpu_calibration = calibration[0];
