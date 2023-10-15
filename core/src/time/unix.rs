@@ -4,6 +4,13 @@ use nix::sys::time::{TimeSpec, TimeValLike};
 use nix::time::{clock_gettime, ClockId};
 use std::ptr;
 use std::sync::Once;
+use ash::vk;
+
+pub const VULKAN_TIMESTAMP_DOMAIN: vk::TimeDomainEXT = vk::TimeDomainEXT::CLOCK_MONOTONIC;
+
+pub fn timestamp_from_vulkan(calibration: u64) -> u64 {
+    calibration
+}
 
 pub fn timestamp_now() -> Timestamp {
     let ts = clock_gettime(ClockId::CLOCK_MONOTONIC).unwrap();

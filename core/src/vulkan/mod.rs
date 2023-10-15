@@ -1,7 +1,7 @@
 mod entrypoint;
 
 use crate::fence_worker::{FenceThread, FenceWorkerMessage};
-use crate::time::timestamp_now;
+use crate::time::{timestamp_from_vulkan, timestamp_now, VULKAN_TIMESTAMP_DOMAIN};
 use crate::{Frame, Timestamp};
 use ash::prelude::VkResult;
 use ash::vk;
@@ -335,7 +335,7 @@ impl VulkanSubmission {
                 .time_domain(vk::TimeDomainEXT::DEVICE)
                 .build(),
             vk::CalibratedTimestampInfoEXT::builder()
-                .time_domain(vk::TimeDomainEXT::QUERY_PERFORMANCE_COUNTER) // TODO
+                .time_domain(VULKAN_TIMESTAMP_DOMAIN)
                 .build(),
         ];
         unsafe {
@@ -360,7 +360,7 @@ impl VulkanSubmission {
                 )?;
             }
             let gpu_calibration = calibration[0];
-            let cpu_calibration = crate::timestamp_from_qpc(calibration[1]);
+            let cpu_calibration = timestamp_from_vulkan(calibration[1]);
             let valid_shift = 64 - device.queue_family_properties.timestamp_valid_bits;
             let gpu_delta = (gpu_ts[0] as i64 - gpu_calibration as i64)
                 .wrapping_shl(valid_shift)
