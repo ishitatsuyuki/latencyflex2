@@ -4,13 +4,16 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-devDependencies:
-  vitepress:
-    specifier: ^1.0.0-rc.22
-    version: 1.0.0-rc.22(@algolia/client-search@4.20.0)(search-insights@2.9.0)
-  vue:
-    specifier: ^3.3.4
-    version: 3.3.4
+importers:
+
+  docs:
+    devDependencies:
+      vitepress:
+        specifier: ^1.0.0-rc.22
+        version: 1.0.0-rc.22(@algolia/client-search@4.20.0)(search-insights@2.9.0)
+      vue:
+        specifier: ^3.3.4
+        version: 3.3.4
 
 packages:
 
