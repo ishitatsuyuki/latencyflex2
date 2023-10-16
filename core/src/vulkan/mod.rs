@@ -82,12 +82,12 @@ impl CommandBuffer {
     // TODO: Create a safe wrapper for CommandPool
     fn new(device: Arc<Device>, pool: vk::CommandPool) -> VkResult<Self> {
         let handle = unsafe {
-            device.handle.allocate_command_buffers_to_vec(
+            device.handle.allocate_command_buffers_single(
                 &vk::CommandBufferAllocateInfo::builder()
                     .command_pool(pool)
                     .command_buffer_count(1),
-            )
-        }?[0];
+            )?
+        };
         Ok(Self {
             device,
             pool,
