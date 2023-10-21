@@ -1,10 +1,13 @@
 [workspace]
 members = [
-    "core"
+    "core",
+    "layer"
 ]
+resolver = "2"
 
 [profile.dev]
 panic = "abort"
 
 [profile.release]
 panic = "abort"
+debug = "line-tables-only"

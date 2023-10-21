@@ -1,13 +1,16 @@
+use std::collections::HashMap;
 use std::mem;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use parking_lot::Mutex;
 use spark::vk::{CommandBufferUsageFlags, QueryResultFlags};
 use spark::{vk, Builder};
 
+pub use crate::fence_worker::FenceWorkerResult;
 use crate::fence_worker::{FenceThread, FenceWorkerMessage};
-use crate::time::{timestamp_from_vulkan, timestamp_now, VULKAN_TIMESTAMP_DOMAIN};
-use crate::{Frame, Timestamp};
+use crate::task::TaskStats;
+use crate::time;
+use crate::Timestamp;
 
 mod entrypoint;
 
@@ -16,8 +19,7 @@ type VkResult<T> = Result<T, vk::Result>;
 struct Device {
     handle: spark::Device,
     limits: vk::PhysicalDeviceLimits,
-    queue_family_index: u32,
-    queue_family_properties: vk::QueueFamilyProperties,
+    queue_family_properties: Vec<vk::QueueFamilyProperties>,
 }
 
 impl Device {
@@ -25,17 +27,14 @@ impl Device {
         instance: spark::Instance,
         phys_device: vk::PhysicalDevice,
         device: spark::Device,
-        queue_family_index: u32,
     ) -> Arc<Device> {
         unsafe {
             let limits = instance.get_physical_device_properties(phys_device).limits;
-            let queue_family_properties = instance
-                .get_physical_device_queue_family_properties_to_vec(phys_device)
-                [queue_family_index as usize];
+            let queue_family_properties =
+                instance.get_physical_device_queue_family_properties_to_vec(phys_device);
             Arc::new(Device {
                 handle: device,
                 limits,
-                queue_family_index,
                 queue_family_properties,
             })
         }
@@ -114,96 +113,112 @@ impl Drop for CommandBuffer {
     }
 }
 
-pub struct VulkanContext {
-    inner: Mutex<VulkanContextInner>,
+pub struct VulkanContext<C> {
+    inner: Mutex<VulkanContextInner<C>>,
 }
 
-struct VulkanContextInner {
+struct VulkanContextInner<C> {
     device: Arc<Device>,
+
+    query_pool: Vec<(Arc<QueryPool>, u32)>,
+    queue_families: HashMap<u32, QueueFamilyContext<C>>,
+}
+
+struct QueueFamilyContext<C> {
+    device: Arc<Device>,
+
     command_pool: vk::CommandPool,
     command_buffer: Vec<CommandBuffer>,
-    query_pool: Vec<(Arc<QueryPool>, u32)>,
+    queues: Vec<QueueContext<C>>,
+}
 
-    fence_thread: Option<FenceThread<VulkanSubmission>>,
+struct QueueContext<C> {
+    device: Arc<Device>,
 
     sem: vk::Semaphore,
     seq: u64,
+
+    fence_thread: Option<FenceThread<VulkanSubmission, C>>,
 }
 
 #[repr(C)]
 pub struct VulkanSubmitAux {
-    submit_before: vk::CommandBuffer,
-    submit_after: vk::CommandBuffer,
-    signal_sem: vk::Semaphore,
-    signal_sem_value: u64,
+    pub submit_before: vk::CommandBuffer,
+    pub submit_after: vk::CommandBuffer,
+    pub signal_sem: vk::Semaphore,
+    pub signal_sem_value: u64,
 }
 
-impl VulkanContext {
-    fn new(device: Arc<Device>) -> VkResult<Arc<VulkanContext>> {
+impl<C: Send + 'static> VulkanContext<C> {
+    pub fn new(
+        instance: spark::Instance,
+        phys_device: vk::PhysicalDevice,
+        device: spark::Device,
+        queues: Vec<(u32, Vec<u32>)>,
+    ) -> VkResult<Arc<VulkanContext<C>>> {
+        let device = Device::new(instance, phys_device, device);
+        let queue_families = queues
+            .into_iter()
+            .map(
+                |(queue_family, queues)| -> VkResult<(u32, QueueFamilyContext<C>)> {
+                    let context = QueueFamilyContext::new(
+                        device.clone(),
+                        queue_family,
+                        queues
+                            .into_iter()
+                            .map(|_| QueueContext::new(device.clone()))
+                            .collect::<VkResult<Vec<QueueContext<C>>>>()?,
+                    )?;
+                    Ok((queue_family, context))
+                },
+            )
+            .collect::<VkResult<HashMap<u32, QueueFamilyContext<C>>>>()?;
+        let context = VulkanContextInner {
+            device,
+            query_pool: Vec::new(),
+            queue_families,
+        };
         let ret = Arc::new(VulkanContext {
-            inner: Mutex::new(VulkanContextInner::new(device)?),
+            inner: Mutex::new(context),
         });
         let weak = Arc::downgrade(&ret);
-        ret.inner.lock().fence_thread =
-            Some(FenceThread::new(move |submission: VulkanSubmission| {
-                let ctx = weak.upgrade().unwrap();
-                submission.complete(&ctx).unwrap()
-            }));
+        for (_, queues) in &mut ret.inner.lock().queue_families {
+            for queue in &mut queues.queues {
+                queue.init_fence_thread(weak.clone());
+            }
+        }
         Ok(ret)
     }
-}
 
-impl VulkanContextInner {
-    fn new(device: Arc<Device>) -> VkResult<Self> {
-        let command_pool = unsafe {
-            device.handle.create_command_pool(
-                &vk::CommandPoolCreateInfo::builder()
-                    .queue_family_index(device.queue_family_index)
-                    .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER),
-                None,
-            )
-        }
-        .unwrap();
+    pub fn submit(&self, queue_family_index: u32, queue_index: u32) -> VkResult<VulkanSubmitAux> {
+        self.inner.lock().submit(queue_family_index, queue_index)
+    }
 
-        let sem = unsafe {
-            device.handle.create_semaphore(
-                &vk::SemaphoreCreateInfo::builder().insert_next(
-                    &mut vk::SemaphoreTypeCreateInfo::builder()
-                        .semaphore_type(vk::SemaphoreType::TIMELINE),
-                ),
-                None,
-            )?
-        };
+    pub fn notify(&self, queue_family_index: u32, queue_index: u32, context: C) {
+        self.inner
+            .lock()
+            .notify(queue_family_index, queue_index, context);
+    }
 
-        Ok(Self {
-            device,
-            command_pool,
-            command_buffer: Vec::new(),
-            query_pool: Vec::new(),
-            fence_thread: None,
-            sem,
-            seq: 1,
-        })
+    pub fn get_result(
+        &self,
+        queue_family_index: u32,
+        queue_index: u32,
+    ) -> Option<FenceWorkerResult<C>> {
+        self.inner
+            .lock()
+            .get_result(queue_family_index, queue_index)
     }
 }
 
-impl Drop for VulkanContextInner {
+impl<C> Drop for VulkanContextInner<C> {
     fn drop(&mut self) {
-        // Drop existing references to command pool first
-        self.command_buffer.clear();
-        // Optional, but for sanity
+        self.queue_families.clear();
         self.query_pool.clear();
-
-        unsafe {
-            self.device.handle.destroy_semaphore(Some(self.sem), None);
-            self.device
-                .handle
-                .destroy_command_pool(Some(self.command_pool), None);
-        }
     }
 }
 
-impl VulkanContextInner {
+impl<C: Send + 'static> VulkanContextInner<C> {
     fn get_query_pool(&mut self) -> VkResult<(Arc<QueryPool>, u32)> {
         let (pool, idx) = if let Some((pool, idx)) = self.query_pool.pop() {
             (pool, idx)
@@ -220,34 +235,13 @@ impl VulkanContextInner {
         Ok((pool, idx))
     }
 
-    fn get_command_buffer(&mut self) -> VkResult<CommandBuffer> {
-        if let Some(cmd) = self.command_buffer.pop() {
-            Ok(cmd)
-        } else {
-            CommandBuffer::new(self.device.clone(), self.command_pool)
-        }
-    }
-
-    fn begin(&mut self, frame: &Arc<Frame>) {
-        self.fence_thread
-            .as_mut()
-            .unwrap()
-            .send(FenceWorkerMessage::BeginFrame(Arc::downgrade(frame)));
-    }
-
-    fn end(&mut self, frame: &Arc<Frame>) {
-        self.fence_thread
-            .as_mut()
-            .unwrap()
-            .send(FenceWorkerMessage::EndFrame(frame.clone()));
-    }
-
-    fn submit(&mut self) -> VkResult<VulkanSubmitAux> {
+    fn submit(&mut self, queue_family_index: u32, queue_index: u32) -> VkResult<VulkanSubmitAux> {
         let queries = (0..2)
             .map(|_| self.get_query_pool())
             .collect::<VkResult<Vec<_>>>()?;
+        let qf = self.queue_families.get_mut(&queue_family_index).unwrap();
         let command_buffers = (0..2)
-            .map(|_| self.get_command_buffer())
+            .map(|_| qf.get_command_buffer())
             .collect::<VkResult<Vec<_>>>()?;
         for i in 0..2 {
             unsafe {
@@ -267,21 +261,26 @@ impl VulkanContextInner {
                     .end_command_buffer(command_buffers[i].handle)?;
             }
         }
-        let seq = self.seq;
-        self.seq += 1;
+
+        let queue_ctx = &mut qf.queues[queue_index as usize];
+        let seq = queue_ctx.seq;
+        queue_ctx.seq += 1;
 
         let ret = VulkanSubmitAux {
             submit_before: command_buffers[0].handle,
             submit_after: command_buffers[1].handle,
-            signal_sem: self.sem,
+            signal_sem: queue_ctx.sem,
             signal_sem_value: seq,
         };
 
-        self.fence_thread
+        queue_ctx
+            .fence_thread
             .as_mut()
             .unwrap()
-            .send(FenceWorkerMessage::Wait(VulkanSubmission {
-                submission_ts: timestamp_now(),
+            .send(FenceWorkerMessage::Submission(VulkanSubmission {
+                queue_family_index,
+                queue_index,
+                submission_ts: time::now(),
                 queries: queries.try_into().map_err(|_| ()).unwrap(),
                 command_buffers: command_buffers.try_into().map_err(|_| ()).unwrap(),
                 seq,
@@ -289,9 +288,116 @@ impl VulkanContextInner {
 
         Ok(ret)
     }
+
+    fn notify(&mut self, queue_family_index: u32, queue_index: u32, context: C) {
+        let queue_ctx = &mut self
+            .queue_families
+            .get_mut(&queue_family_index)
+            .unwrap()
+            .queues[queue_index as usize];
+        queue_ctx
+            .fence_thread
+            .as_mut()
+            .unwrap()
+            .send(FenceWorkerMessage::Notification(context));
+    }
+
+    fn get_result(
+        &mut self,
+        queue_family_index: u32,
+        queue_index: u32,
+    ) -> Option<FenceWorkerResult<C>> {
+        let queue_ctx = &mut self
+            .queue_families
+            .get_mut(&queue_family_index)
+            .unwrap()
+            .queues[queue_index as usize];
+        queue_ctx.fence_thread.as_mut().unwrap().recv()
+    }
+}
+
+impl<C: Send> QueueFamilyContext<C> {
+    fn new(
+        device: Arc<Device>,
+        queue_family_index: u32,
+        queues: Vec<QueueContext<C>>,
+    ) -> VkResult<Self> {
+        let command_pool = unsafe {
+            device.handle.create_command_pool(
+                &vk::CommandPoolCreateInfo::builder()
+                    .queue_family_index(queue_family_index)
+                    .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER),
+                None,
+            )
+        }
+        .unwrap();
+        Ok(Self {
+            device: device.clone(),
+            command_pool,
+            command_buffer: Vec::new(),
+            queues,
+        })
+    }
+
+    fn get_command_buffer(&mut self) -> VkResult<CommandBuffer> {
+        if let Some(cmd) = self.command_buffer.pop() {
+            Ok(cmd)
+        } else {
+            CommandBuffer::new(self.device.clone(), self.command_pool)
+        }
+    }
+}
+
+impl<C> Drop for QueueFamilyContext<C> {
+    fn drop(&mut self) {
+        self.command_buffer.clear();
+        unsafe {
+            self.device
+                .handle
+                .destroy_command_pool(Some(self.command_pool), None);
+        }
+    }
+}
+
+impl<C: Send + 'static> QueueContext<C> {
+    fn new(device: Arc<Device>) -> VkResult<Self> {
+        let sem = unsafe {
+            device.handle.create_semaphore(
+                &vk::SemaphoreCreateInfo::builder().insert_next(
+                    &mut vk::SemaphoreTypeCreateInfo::builder()
+                        .semaphore_type(vk::SemaphoreType::TIMELINE),
+                ),
+                None,
+            )?
+        };
+        Ok(Self {
+            device,
+            fence_thread: None,
+            sem,
+            seq: 1,
+        })
+    }
+
+    fn init_fence_thread(&mut self, context: Weak<VulkanContext<C>>) {
+        self.fence_thread = Some(FenceThread::new(move |submission: VulkanSubmission| {
+            let context = context.upgrade().unwrap();
+            submission.complete(&context).unwrap()
+        }));
+    }
+}
+
+impl<C> Drop for QueueContext<C> {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.handle.destroy_semaphore(Some(self.sem), None);
+        }
+    }
 }
 
 struct VulkanSubmission {
+    queue_family_index: u32,
+    queue_index: u32,
+
     queries: [(Arc<QueryPool>, u32); 2],
     command_buffers: [CommandBuffer; 2],
     seq: u64,
@@ -300,13 +406,15 @@ struct VulkanSubmission {
 }
 
 impl VulkanSubmission {
-    fn complete(self, context: &VulkanContext) -> VkResult<(Timestamp, Timestamp, Timestamp)> {
+    fn complete<C>(self, context: &VulkanContext<C>) -> VkResult<TaskStats> {
+        let qfi = self.queue_family_index;
+        let qi = self.queue_index;
         let device;
         let sem;
         {
             let lock = context.inner.lock();
             device = lock.device.clone();
-            sem = lock.sem;
+            sem = lock.queue_families[&qfi].queues[qi as usize].sem;
         }
         unsafe {
             device.handle.wait_semaphores(
@@ -319,7 +427,7 @@ impl VulkanSubmission {
         let mut deviation = 0u64;
         let timestamp_info = [
             *vk::CalibratedTimestampInfoEXT::builder().time_domain(vk::TimeDomainEXT::DEVICE),
-            *vk::CalibratedTimestampInfoEXT::builder().time_domain(VULKAN_TIMESTAMP_DOMAIN),
+            *vk::CalibratedTimestampInfoEXT::builder().time_domain(time::VULKAN_TIMESTAMP_DOMAIN),
         ];
         unsafe {
             device.handle.get_calibrated_timestamps_ext(
@@ -341,8 +449,9 @@ impl VulkanSubmission {
                 )?;
             }
             let gpu_calibration = calibration[0];
-            let cpu_calibration = timestamp_from_vulkan(calibration[1]);
-            let valid_shift = 64 - device.queue_family_properties.timestamp_valid_bits;
+            let cpu_calibration = time::timestamp_from_vulkan(calibration[1]);
+            let valid_shift =
+                64 - device.queue_family_properties[qfi as usize].timestamp_valid_bits;
             let gpu_delta = (gpu_ts[0] as i64 - gpu_calibration as i64)
                 .wrapping_shl(valid_shift)
                 .wrapping_shr(valid_shift);
@@ -359,9 +468,17 @@ impl VulkanSubmission {
             }
             for mut buf in self.command_buffers {
                 buf.reset()?;
-                lock.command_buffer.push(buf);
+                lock.queue_families
+                    .get_mut(&qfi)
+                    .unwrap()
+                    .command_buffer
+                    .push(buf);
             }
         }
-        Ok((self.submission_ts, begin_ts, end_ts))
+        Ok(TaskStats {
+            queued: self.submission_ts,
+            start: begin_ts,
+            end: end_ts,
+        })
     }
 }

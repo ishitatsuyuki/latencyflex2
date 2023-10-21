@@ -1,0 +1,17 @@
+[package]
+name = "latencyflex2-layer"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+latencyflex2-core = { path = "../core" }
+cstr = "0.2.11"
+spark = { git = "https://github.com/sjb3d/spark.git", version = "0.1.0" }
+bumpalo = { version = "3.14.0", features = ["collections"] }
+
+[build-dependencies]
+serde = "1.0.189"
+serde_json = "1.0.107"

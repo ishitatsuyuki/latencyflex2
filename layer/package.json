@@ -1,0 +1,16 @@
+{
+  "name": "latencyflex2-layer",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "build": "cargo-cp-artifact -ac latencyflex2-layer liblatencyflex2_layer.so -- cargo build --message-format=json-render-diagnostics"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "cargo-cp-artifact": "^0.1.8"
+  }
+}

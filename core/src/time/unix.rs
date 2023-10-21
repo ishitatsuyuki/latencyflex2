@@ -14,7 +14,7 @@ pub fn timestamp_from_vulkan(calibration: u64) -> u64 {
     calibration
 }
 
-pub fn timestamp_now() -> Timestamp {
+pub fn now() -> Timestamp {
     let ts = clock_gettime(ClockId::CLOCK_MONOTONIC).unwrap();
     ts.num_nanoseconds() as _
 }

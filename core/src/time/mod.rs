@@ -18,9 +18,9 @@ mod tests {
 
         let below_thresh = (0..ITER)
             .filter(|_| {
-                let begin = timestamp_now();
+                let begin = now();
                 sleep_until(begin + DURATION);
-                let end = timestamp_now();
+                let end = now();
                 assert!(end - begin >= DURATION);
                 end - begin <= DURATION + THRESHOLD
             })

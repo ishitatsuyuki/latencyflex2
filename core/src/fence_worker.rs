@@ -1,110 +1,75 @@
-use crate::{Frame, Interval, MarkType, Timestamp};
-use std::sync::{mpsc, Arc, Weak};
+use std::sync::mpsc;
 
-pub struct FenceThread<S> {
+use crate::task::TaskStats;
+
+pub struct FenceThread<S, C> {
     thread: Option<std::thread::JoinHandle<()>>,
-    tx: Option<mpsc::Sender<FenceWorkerMessage<S>>>,
+    tx: Option<mpsc::Sender<FenceWorkerMessage<S, C>>>,
+    rx: mpsc::Receiver<FenceWorkerResult<C>>,
 }
 
-impl<S: Send + 'static> FenceThread<S> {
-    pub fn new<F: FnMut(S) -> (Timestamp, Timestamp, Timestamp) + Send + 'static>(
+impl<S: Send + 'static, C: Send + 'static> FenceThread<S, C> {
+    pub fn new<F: FnMut(S) -> TaskStats + Send + 'static>(
         callback: F,
     ) -> Self {
-        let (tx, rx) = mpsc::channel();
+        let (req_tx, req_rx) = mpsc::channel();
+        let (res_tx, res_rx) = mpsc::channel();
         let mut worker = FenceWorker {
-            rx,
-            tracker: None,
-            last_finish: 0,
+            rx: req_rx,
+            tx: res_tx,
             callback,
         };
         let thread = std::thread::spawn(move || worker.run());
         Self {
             thread: Some(thread),
-            tx: Some(tx),
+            tx: Some(req_tx),
+            rx: res_rx,
         }
     }
 
-    pub fn send(&mut self, msg: FenceWorkerMessage<S>) {
+    pub fn send(&mut self, msg: FenceWorkerMessage<S, C>) {
         self.tx.as_mut().unwrap().send(msg).unwrap();
+    }
+    
+    pub fn recv(&mut self) -> Option<FenceWorkerResult<C>> {
+        self.rx.try_recv().ok()
     }
 }
 
-impl<S> Drop for FenceThread<S> {
+impl<S, C> Drop for FenceThread<S, C> {
     fn drop(&mut self) {
         let _ = self.tx.take();
         let _ = self.thread.take().unwrap().join();
     }
 }
 
-struct FenceWorker<S, F: FnMut(S) -> (Timestamp, Timestamp, Timestamp)> {
-    rx: mpsc::Receiver<FenceWorkerMessage<S>>,
-    tracker: Option<Tracker>,
-
-    last_finish: Timestamp,
+struct FenceWorker<S, C, F: FnMut(S) -> TaskStats> {
+    rx: mpsc::Receiver<FenceWorkerMessage<S, C>>,
+    tx: mpsc::Sender<FenceWorkerResult<C>>,
 
     callback: F,
 }
 
-struct Tracker {
-    frame: Weak<Frame>,
-    begin_ts: Option<Timestamp>,
-    end_ts: Option<Timestamp>,
-    duration: Interval,
-    queuing_delay: Option<Interval>,
+pub enum FenceWorkerMessage<S, C> {
+    Submission(S),
+    Notification(C),
 }
 
-pub enum FenceWorkerMessage<S> {
-    BeginFrame(Weak<Frame>),
-    Wait(S),
-    EndFrame(Arc<Frame>),
+pub enum FenceWorkerResult<C> {
+    Submission(TaskStats),
+    Notification(C),
 }
 
-impl<S, F: FnMut(S) -> (Timestamp, Timestamp, Timestamp)> FenceWorker<S, F> {
+impl<S, C, F: FnMut(S) -> TaskStats> FenceWorker<S, C, F> {
     fn run(&mut self) {
         while let Ok(job) = self.rx.recv() {
             match job {
-                FenceWorkerMessage::BeginFrame(frame) => {
-                    self.tracker = Some(Tracker {
-                        frame,
-                        begin_ts: None,
-                        end_ts: None,
-                        queuing_delay: None,
-                        duration: 0,
-                    });
+                FenceWorkerMessage::Submission(submission) => {
+                    let stats = (self.callback)(submission);
+                    let _ = self.tx.send(FenceWorkerResult::Submission(stats));
                 }
-                FenceWorkerMessage::Wait(job) => {
-                    let (submission_ts, begin_ts, end_ts) = (self.callback)(job);
-                    if let Some(tr) = self.tracker.as_mut() {
-                        tr.begin_ts =
-                            Some(tr.begin_ts.map(|ts| ts.min(begin_ts)).unwrap_or(begin_ts));
-                        tr.end_ts = Some(tr.end_ts.map(|ts| ts.max(end_ts)).unwrap_or(end_ts));
-
-                        let queueing_delay = self.last_finish.saturating_sub(submission_ts);
-                        tr.queuing_delay = Some(
-                            tr.queuing_delay
-                                .map(|ts| ts.min(queueing_delay))
-                                .unwrap_or(queueing_delay),
-                        );
-
-                        let duration = end_ts.saturating_sub(self.last_finish.max(submission_ts));
-                        tr.duration += duration;
-
-                        self.last_finish = end_ts;
-                    }
-                }
-                FenceWorkerMessage::EndFrame(frame) => {
-                    let tracker = self.tracker.take().unwrap();
-                    assert_eq!(Arc::as_ptr(&frame), Weak::as_ptr(&tracker.frame));
-                    if let Some(begin_ts) = tracker.begin_ts {
-                        frame.mark(1000, MarkType::Begin, begin_ts);
-                    }
-                    if let Some(end_ts) = tracker.end_ts {
-                        frame.mark(1000, MarkType::End, end_ts);
-                    }
-                    frame.set_inv_throughput(1000, tracker.duration);
-                    if let Some(queueing_delay) = tracker.queuing_delay {
-                        frame.set_queueing_delay(800, queueing_delay);
-                    }
+                FenceWorkerMessage::Notification(context) => {
+                    let _ = self.tx.send(FenceWorkerResult::Notification(context));
                 }
             }
         }
