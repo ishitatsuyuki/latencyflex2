@@ -1,7 +1,7 @@
 use crate::VkResult;
 use latencyflex2_core::vulkan::VulkanContext;
 use latencyflex2_core::{
-    time, FrameAggregator, FrameId, ReflexMappingTracker, TaskAccumulator, Timestamp,
+    time, FrameAggregator, FrameId, ReflexId, ReflexMappingTracker, TaskAccumulator, Timestamp,
 };
 use spark::{vk, Builder};
 use std::collections::HashMap;
@@ -48,9 +48,8 @@ pub struct QueueState {
     pub queue_index: u32,
 
     pub stats: TaskAccumulator,
-    pub stats_frame: Option<LayerFrame>,
 
-    pub frame: Option<LayerFrame>,
+    pub frame: Option<ReflexId>,
 }
 
 impl DeviceState {

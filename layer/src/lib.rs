@@ -350,7 +350,6 @@ unsafe extern "system" fn create_device(
                         queue_family_index,
                         queue_index,
                         stats: Default::default(),
-                        stats_frame: None,
                         frame: None,
                     },
                 );
@@ -515,26 +514,24 @@ unsafe extern "system" fn queue_submit2(
                     }
                 });
 
-                let frame = latency_present_id
-                    .map(|i| i.present_id)
-                    .and_then(|reflex_id| device_state.frame_tracker.get(ReflexId(reflex_id)));
+                let reflex_id = latency_present_id.map(|i| ReflexId(i.present_id));
 
-                let new_submit = if let Some(frame) = frame {
-                    let id = frame.id;
-                    if queue_state.frame.as_ref().map(|frame| frame.id) != Some(id) {
-                        if let Some(queue_frame_id) =
-                            queue_state.frame.as_ref().map(|frame| frame.id)
-                        {
-                            assert!(queue_frame_id < id);
+                let new_submit = if let Some(reflex_id) = reflex_id {
+                    if queue_state.frame != Some(reflex_id) {
+                        if let Some(queue_frame_id) = queue_state.frame {
+                            assert!(queue_frame_id < reflex_id);
                         }
 
-                        queue_state.frame = Some(frame.clone());
+                        if let Some(current_id) = queue_state.frame {
+                            let current_frame = device_state.frame_tracker.get(current_id);
+                            device_state.vulkan_tracker.notify(
+                                queue_state.queue_family_index,
+                                queue_state.queue_index,
+                                current_frame,
+                            );
+                        }
 
-                        device_state.vulkan_tracker.notify(
-                            queue_state.queue_family_index,
-                            queue_state.queue_index,
-                            Some(frame),
-                        );
+                        queue_state.frame = Some(reflex_id);
                     }
                     let data = device_state
                         .vulkan_tracker
@@ -623,24 +620,19 @@ unsafe extern "system" fn queue_present_khr(
                 present_id.swapchain_count as usize,
             );
             for present_id in present_ids {
-                let id_to_invalidate = device_state
-                    .frame_tracker
-                    .get(ReflexId(*present_id))
-                    .map(|x| x.id);
-                device_state.frame_tracker.present(ReflexId(*present_id));
-                if let Some(id_to_invalidate) = id_to_invalidate {
-                    for queue in &device_state.queues {
-                        let queue_state = global_state.queue_table.get_mut(&queue).unwrap();
-                        if queue_state.frame.as_ref().map(|f| f.id) == Some(id_to_invalidate) {
-                            queue_state.frame = None;
-                            device_state.vulkan_tracker.notify(
-                                queue_state.queue_family_index,
-                                queue_state.queue_index,
-                                None,
-                            );
-                        }
+                let present_id = ReflexId(*present_id);
+                for queue in &device_state.queues {
+                    let queue_state = global_state.queue_table.get_mut(&queue).unwrap();
+                    if queue_state.frame == Some(present_id) {
+                        queue_state.frame = None;
+                        device_state.vulkan_tracker.notify(
+                            queue_state.queue_family_index,
+                            queue_state.queue_index,
+                            device_state.frame_tracker.get(present_id),
+                        );
                     }
                 }
+                device_state.frame_tracker.present(present_id);
             }
         }
 
@@ -734,24 +726,20 @@ unsafe extern "system" fn latency_sleep_nv(
                     queue_state.stats.accumulate(&stats);
                 }
                 FenceWorkerResult::Notification(frame) => {
-                    if let Some(old_frame) = queue_state.stats_frame.take() {
-                        // Negative edge
+                    if let Some(frame) = frame {
                         device_state.aggregator.lock().unwrap().mark(
-                            old_frame.id,
+                            frame.id,
                             StageId(i),
                             queue_state.stats.stats(),
                         );
-                        queue_state.stats.reset();
                     }
-                    queue_state.stats_frame = frame;
+                    queue_state.stats.reset();
                 }
             }
         }
     }
 
-    let mut aggregator = device_state.aggregator.lock().unwrap();
-    let (frame_id, deadline) = aggregator.new_frame();
-    drop(aggregator);
+    let (frame_id, deadline) = device_state.aggregator.lock().unwrap().new_frame();
     let vk_frame = LayerFrame {
         id: frame_id,
         inner: Arc::new(Mutex::new(LayerFrameInner {

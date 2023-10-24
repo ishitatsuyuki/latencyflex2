@@ -10,8 +10,8 @@ pub struct StageId(pub usize);
 
 #[derive(Copy, Clone)]
 pub struct Config {
-    pub alpha: f64,
-    pub beta: f64,
+    pub delay_gain: f64,
+    pub duration_gain: f64,
     pub target_delay: u64,
     pub clamp_delay: u64,
     pub clamp_frame_time: u64,
@@ -20,8 +20,8 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            alpha: 0.15,
-            beta: 0.3,
+            delay_gain: 0.15,
+            duration_gain: 0.3,
             target_delay: 2_000_000,
             clamp_delay: 50_000_000,
             clamp_frame_time: 50_000_000,
@@ -48,7 +48,7 @@ impl FrameAggregator {
                     active: false,
                     next_frame_id: FrameId(0),
                     frame_queue: Default::default(),
-                    duration_estimator: EwmaEstimator::new(config.beta),
+                    duration_estimator: EwmaEstimator::new(config.duration_gain),
                 })
                 .collect(),
             frames: BTreeMap::new(),
@@ -101,7 +101,7 @@ impl FrameAggregator {
                 .estimate_delay()
                 .map(|delay| delay as i64 - self.config.target_delay as i64)
                 .unwrap_or(0);
-            let adjustment = (predicted_delay_from_target as f64 * self.config.alpha) as i64;
+            let adjustment = (predicted_delay_from_target as f64 * self.config.delay_gain) as i64;
             let frame_time = self.estimate_frame_time();
             let target = now.max((last_frame_start + frame_time).saturating_add_signed(adjustment));
             let adjustment = (target - last_frame_start) as i64 - frame_time as i64;
