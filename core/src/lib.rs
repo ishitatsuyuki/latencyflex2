@@ -7,6 +7,9 @@ pub mod dx12;
 mod entrypoint;
 mod ewma;
 mod fence_worker;
+
+#[cfg(feature = "profiler")]
+mod profiler;
 mod reflex;
 mod stage;
 mod task;
