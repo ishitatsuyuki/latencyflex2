@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+
+use crate::FrameId;
+
 #[derive(Default)]
 #[repr(C)]
 pub struct FrameStageStats {
@@ -5,40 +9,74 @@ pub struct FrameStageStats {
     pub duration: u64,
 }
 
-#[derive(Default)]
-pub struct TaskAccumulator {
-    delay: Option<u64>,
-    duration: u64,
-    last_finish: u64,
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct TaskStats {
+    pub earliest: u64,
+    pub actual: u64,
 }
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
-pub struct TaskStats {
-    pub queued: u64,
-    pub start: u64,
-    pub end: u64,
+pub struct TimelinePoint {
+    pub task: TaskStats,
+    pub signaled: u64,
 }
 
-impl TaskAccumulator {
-    pub fn accumulate(&mut self, stats: &TaskStats) {
-        let task_delay = stats.start - stats.queued;
-        self.delay = Some(self.delay.map_or(task_delay, |qd| qd.min(task_delay)));
-        let task_duration = stats.end - stats.queued.max(self.last_finish);
-        self.duration += task_duration;
-        self.last_finish = stats.end;
-    }
+#[derive(Default)]
+pub struct Timeline {
+    pub earliest: HashMap<FrameId, u64>,
+    pub actual: u64,
+    pub duration: HashMap<FrameId, u64>,
+}
 
-    pub fn stats(&self) -> FrameStageStats {
-        FrameStageStats {
-            delay: self.delay.unwrap_or(0),
-            duration: self.duration,
+impl TaskStats {
+    fn delay(&self) -> u64 {
+        self.actual - self.earliest
+    }
+}
+
+impl Timeline {
+    pub fn accumulate(
+        &mut self,
+        frame_id: FrameId,
+        deps: impl IntoIterator<Item = &TimelinePoint> + Clone,
+        finish: Option<u64>,
+    ) -> TaskStats {
+        // TODO: Assert at least one dep
+        let earliest = deps
+            .clone()
+            .into_iter()
+            .map(|p: &TimelinePoint| p.signaled - p.task.delay())
+            .chain(self.earliest.get(&frame_id).copied())
+            .max();
+        let actual = deps
+            .into_iter()
+            .map(|p: &TimelinePoint| p.signaled)
+            .max()
+            .unwrap_or(0);
+        // TODO: Check or handle negative
+        let duration = match finish {
+            None => 0,
+            Some(finish) => finish - actual,
+        };
+        if let Some(earliest) = earliest {
+            self.earliest.insert(frame_id, earliest + duration);
+        }
+        self.actual = actual + duration;
+        self.duration
+            .entry(frame_id)
+            .and_modify(|d| *d += duration)
+            .or_insert(duration);
+        TaskStats {
+            earliest: earliest.unwrap_or(0),
+            actual,
         }
     }
 
     /// Reset accumulated delay and duration, keeping internal state needed across frames.
-    pub fn reset(&mut self) {
-        self.delay = None;
-        self.duration = 0;
+    pub fn end_frame(&mut self, frame_id: FrameId) -> u64 {
+        self.earliest.remove(&frame_id).unwrap_or(0)
+        // TODO: Submit duration
     }
 }

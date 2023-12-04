@@ -16,6 +16,7 @@ mod task;
 pub mod time;
 #[cfg(feature = "vulkan")]
 pub mod vulkan;
+mod async;
 
 pub type Timestamp = u64;
 pub type Interval = u64;
