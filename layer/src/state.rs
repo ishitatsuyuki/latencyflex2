@@ -1,13 +1,16 @@
-use crate::VkResult;
-use latencyflex2_core::vulkan::VulkanContext;
-use latencyflex2_core::{
-    time, FrameAggregator, FrameId, ReflexId, ReflexMappingTracker, TaskAccumulator, Timestamp,
-};
-use spark::{vk, Builder};
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex, MutexGuard, OnceLock, Weak};
 use std::thread;
 use std::thread::JoinHandle;
+
+use spark::{vk, Builder};
+
+use latencyflex2_core::vulkan::VulkanContext;
+use latencyflex2_core::{
+    time, FrameAggregator, FrameId, ReflexId, ReflexMappingTracker, TaskAccumulator, Timestamp,
+};
+
+use crate::VkResult;
 
 pub struct SleepJob {
     pub deadline: Timestamp,
@@ -31,7 +34,7 @@ pub struct InstanceState {
 
 pub struct DeviceState {
     pub gdpa: vk::FnGetDeviceProcAddr,
-    pub device: spark::Device,
+    pub device: Arc<spark::Device>,
     pub queues: Vec<vk::Queue>,
     pub swapchains: HashMap<vk::SwapchainKHR, SwapchainState>,
 
@@ -62,7 +65,7 @@ impl DeviceState {
     ) -> VkResult<Self> {
         Ok(Self {
             gdpa,
-            device,
+            device: Arc::new(device),
             queues: queues
                 .iter()
                 .flat_map(|(_, queues)| queues.into_iter().map(|(_, queue)| *queue))
@@ -127,20 +130,20 @@ impl SwapchainState {
         let (sleep_thread_tx, sleep_thread_rx) = mpsc::channel::<SleepJob>();
         let sleep_thread = thread::spawn(move || {
             while let Ok(job) = sleep_thread_rx.recv() {
-                time::sleep_until(job.deadline);
-                {
+                let device = {
                     let mut global_state = get_global_state();
                     let device_state = global_state.device_table.get_mut(&device).unwrap();
-
-                    unsafe {
-                        let res = device_state.device.signal_semaphore(
-                            &vk::SemaphoreSignalInfo::builder()
-                                .value(job.value)
-                                .semaphore(job.semaphore),
-                        );
-                        if let Err(err) = res {
-                            eprintln!("failed to signal semaphore: {:?}", err);
-                        }
+                    device_state.device.clone()
+                };
+                time::sleep_until(job.deadline);
+                unsafe {
+                    let res = device.signal_semaphore(
+                        &vk::SemaphoreSignalInfo::builder()
+                            .value(job.value)
+                            .semaphore(job.semaphore),
+                    );
+                    if let Err(err) = res {
+                        eprintln!("failed to signal semaphore: {:?}", err);
                     }
                 }
             }

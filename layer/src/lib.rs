@@ -34,6 +34,13 @@ fn convert_vk_result(f: impl FnOnce() -> VkResult<()>) -> vk::Result {
     }
 }
 
+fn convert_vk_result_multi_success(f: impl FnOnce() -> VkResult<vk::Result>) -> vk::Result {
+    match f() {
+        Ok(result) => result,
+        Err(err) => err,
+    }
+}
+
 unsafe fn get_instance_override(name: &str) -> Option<vk::FnVoidFunction> {
     match name {
         "vkCreateInstance" => Some(mem::transmute(create_instance as vk::FnCreateInstance)),
@@ -466,18 +473,20 @@ unsafe extern "system" fn queue_submit(
 ) -> vk::Result {
     convert_vk_result(move || {
         let queue = queue.unwrap();
-        let mut global_state = state::get_global_state();
-        let global_state = global_state.deref_mut();
-        let queue_state = global_state.queue_table.get(&queue).unwrap();
-        let device_state = global_state
-            .device_table
-            .get_mut(&queue_state.device)
-            .unwrap();
+        let device = {
+            let mut global_state = state::get_global_state();
+            let global_state = global_state.deref_mut();
+            let queue_state = global_state.queue_table.get(&queue).unwrap();
+            let device_state = global_state
+                .device_table
+                .get_mut(&queue_state.device)
+                .unwrap();
+            device_state.device.clone()
+        };
 
         let submits = slice::from_raw_parts(p_submits, submit_count as usize);
         eprintln!("vkQueueSubmit is not currently supported for instrumentation yet! Consider using vkQueueSubmit2.");
-        let result = device_state.device.queue_submit(queue, &submits, fence);
-        result
+        device.queue_submit(queue, &submits, fence)
     })
 }
 
@@ -489,97 +498,105 @@ unsafe extern "system" fn queue_submit2(
 ) -> vk::Result {
     convert_vk_result(move || {
         let queue = queue.unwrap();
-        let mut global_state = state::get_global_state();
-        let global_state = global_state.deref_mut();
-        let queue_state = global_state.queue_table.get_mut(&queue).unwrap();
-        let device_state = global_state
-            .device_table
-            .get_mut(&queue_state.device)
-            .unwrap();
-        let submits = slice::from_raw_parts(p_submits, submit_count as usize);
-
+        let device;
         let patch_alloc = Bump::new();
-        let new_submits = submits
-            .iter()
-            .map(|submit| {
-                let p_next = (submit.p_next as *const vk::BaseInStructure).as_ref();
-                let mut p_next_chain = iter::successors(p_next, |p_next| p_next.p_next.as_ref());
-                let latency_present_id = p_next_chain.find_map(|in_struct| {
-                    let in_struct = in_struct as *const vk::BaseInStructure;
-                    match (*in_struct).s_type {
-                        vk::StructureType::LATENCY_SUBMISSION_PRESENT_ID_NV => unsafe {
-                            Some(&mut *(in_struct as *mut vk::LatencySubmissionPresentIdNV))
-                        },
-                        _ => None,
-                    }
-                });
+        let new_submits;
+        {
+            let mut global_state = state::get_global_state();
+            let global_state = global_state.deref_mut();
+            let queue_state = global_state.queue_table.get_mut(&queue).unwrap();
+            let device_state = global_state
+                .device_table
+                .get_mut(&queue_state.device)
+                .unwrap();
 
-                let reflex_id = latency_present_id.map(|i| ReflexId(i.present_id));
-
-                let new_submit = if let Some(reflex_id) = reflex_id {
-                    if queue_state.frame != Some(reflex_id) {
-                        if let Some(queue_frame_id) = queue_state.frame {
-                            assert!(queue_frame_id < reflex_id);
+            let submits = slice::from_raw_parts(p_submits, submit_count as usize);
+            new_submits = submits
+                .iter()
+                .map(|submit| {
+                    let p_next = (submit.p_next as *const vk::BaseInStructure).as_ref();
+                    let mut p_next_chain =
+                        iter::successors(p_next, |p_next| p_next.p_next.as_ref());
+                    let latency_present_id = p_next_chain.find_map(|in_struct| {
+                        let in_struct = in_struct as *const vk::BaseInStructure;
+                        match (*in_struct).s_type {
+                            vk::StructureType::LATENCY_SUBMISSION_PRESENT_ID_NV => unsafe {
+                                Some(&mut *(in_struct as *mut vk::LatencySubmissionPresentIdNV))
+                            },
+                            _ => None,
                         }
+                    });
 
-                        if let Some(current_id) = queue_state.frame {
-                            let current_frame = device_state.frame_tracker.get(current_id);
-                            device_state.vulkan_tracker.notify(
-                                queue_state.queue_family_index,
-                                queue_state.queue_index,
-                                current_frame,
-                            );
+                    let reflex_id = latency_present_id.map(|i| ReflexId(i.present_id));
+
+                    let new_submit = if let Some(reflex_id) = reflex_id {
+                        if queue_state.frame != Some(reflex_id) {
+                            if let Some(queue_frame_id) = queue_state.frame {
+                                assert!(queue_frame_id < reflex_id);
+                            }
+
+                            if let Some(current_id) = queue_state.frame {
+                                let current_frame = device_state.frame_tracker.get(current_id);
+                                device_state.vulkan_tracker.notify(
+                                    queue_state.queue_family_index,
+                                    queue_state.queue_index,
+                                    current_frame,
+                                );
+                            }
+
+                            queue_state.frame = Some(reflex_id);
                         }
-
-                        queue_state.frame = Some(reflex_id);
-                    }
-                    let data = device_state
-                        .vulkan_tracker
-                        .submit(queue_state.queue_family_index, queue_state.queue_index)?;
-                    let cmd_bufs = slice::from_raw_parts(
-                        submit.p_command_buffer_infos,
-                        submit.command_buffer_info_count as usize,
-                    );
-                    let new_cmd_bufs = iter::once(
-                        *vk::CommandBufferSubmitInfo::builder().command_buffer(data.submit_before),
-                    )
-                    .chain(cmd_bufs.iter().copied().chain(iter::once(
-                        *vk::CommandBufferSubmitInfo::builder().command_buffer(data.submit_after),
-                    )))
-                    .collect_in::<BVec<_>>(&patch_alloc)
-                    .into_bump_slice();
-                    let signal_sem_info = slice::from_raw_parts(
-                        submit.p_signal_semaphore_infos,
-                        submit.signal_semaphore_info_count as usize,
-                    );
-                    let new_signal_sem_info = signal_sem_info
-                        .iter()
-                        .copied()
-                        .chain(iter::once(
-                            *vk::SemaphoreSubmitInfo::builder()
-                                .semaphore(data.signal_sem)
-                                .value(data.signal_sem_value),
-                        ))
+                        let data = device_state
+                            .vulkan_tracker
+                            .submit(queue_state.queue_family_index, queue_state.queue_index)?;
+                        let cmd_bufs = slice::from_raw_parts(
+                            submit.p_command_buffer_infos,
+                            submit.command_buffer_info_count as usize,
+                        );
+                        let new_cmd_bufs = iter::once(
+                            *vk::CommandBufferSubmitInfo::builder()
+                                .command_buffer(data.submit_before),
+                        )
+                        .chain(
+                            cmd_bufs.iter().copied().chain(iter::once(
+                                *vk::CommandBufferSubmitInfo::builder()
+                                    .command_buffer(data.submit_after),
+                            )),
+                        )
                         .collect_in::<BVec<_>>(&patch_alloc)
                         .into_bump_slice();
-                    vk::SubmitInfo2 {
-                        command_buffer_info_count: new_cmd_bufs.len() as u32,
-                        p_command_buffer_infos: new_cmd_bufs.as_ptr(),
-                        signal_semaphore_info_count: new_signal_sem_info.len() as u32,
-                        p_signal_semaphore_infos: new_signal_sem_info.as_ptr(),
-                        ..*submit
-                    }
-                } else {
-                    *submit
-                };
-                Ok(new_submit)
-            })
-            .collect_in::<VkResult<BVec<_>>>(&patch_alloc)?;
-        // TODO: Fix potential leak on error
+                        let signal_sem_info = slice::from_raw_parts(
+                            submit.p_signal_semaphore_infos,
+                            submit.signal_semaphore_info_count as usize,
+                        );
+                        let new_signal_sem_info = signal_sem_info
+                            .iter()
+                            .copied()
+                            .chain(iter::once(
+                                *vk::SemaphoreSubmitInfo::builder()
+                                    .semaphore(data.signal_sem)
+                                    .value(data.signal_sem_value),
+                            ))
+                            .collect_in::<BVec<_>>(&patch_alloc)
+                            .into_bump_slice();
+                        vk::SubmitInfo2 {
+                            command_buffer_info_count: new_cmd_bufs.len() as u32,
+                            p_command_buffer_infos: new_cmd_bufs.as_ptr(),
+                            signal_semaphore_info_count: new_signal_sem_info.len() as u32,
+                            p_signal_semaphore_infos: new_signal_sem_info.as_ptr(),
+                            ..*submit
+                        }
+                    } else {
+                        *submit
+                    };
+                    Ok(new_submit)
+                })
+                .collect_in::<VkResult<BVec<_>>>(&patch_alloc)?;
+            // TODO: Fix potential leak on error
+            device = device_state.device.clone();
+        }
 
-        let result = device_state
-            .device
-            .queue_submit2(queue, &new_submits, fence);
+        let result = device.queue_submit2(queue, &new_submits, fence);
         result
     })
 }
@@ -588,15 +605,18 @@ unsafe extern "system" fn queue_present_khr(
     queue: Option<vk::Queue>,
     p_present_info: *const vk::PresentInfoKHR,
 ) -> vk::Result {
-    convert_vk_result(move || {
+    convert_vk_result_multi_success(move || {
         let queue = queue.unwrap();
-        let mut global_state = state::get_global_state();
-        let global_state = global_state.deref_mut();
-        let queue_state = global_state.queue_table.get(&queue).unwrap();
-        let device_state = global_state
-            .device_table
-            .get_mut(&queue_state.device)
-            .unwrap();
+        let device = {
+            let mut global_state = state::get_global_state();
+            let global_state = global_state.deref_mut();
+            let queue_state = global_state.queue_table.get(&queue).unwrap();
+            let device_state = global_state
+                .device_table
+                .get_mut(&queue_state.device)
+                .unwrap();
+            device_state.device.clone()
+        };
 
         let p_next = ((*p_present_info).p_next as *const vk::BaseInStructure).as_ref();
         let mut p_next_chain = iter::successors(p_next, |p_next| p_next.p_next.as_ref());
@@ -610,11 +630,17 @@ unsafe extern "system" fn queue_present_khr(
             }
         });
 
-        device_state
-            .device
-            .queue_present_khr(queue, &*p_present_info)?;
+        let ret = device.queue_present_khr(queue, &*p_present_info)?;
 
         if let Some(present_id) = present_id {
+            let mut global_state = state::get_global_state();
+            let global_state = global_state.deref_mut();
+            let queue_state = global_state.queue_table.get(&queue).unwrap();
+            let device_state = global_state
+                .device_table
+                .get_mut(&queue_state.device)
+                .unwrap();
+
             let present_ids = slice::from_raw_parts(
                 present_id.p_present_ids,
                 present_id.swapchain_count as usize,
@@ -636,7 +662,7 @@ unsafe extern "system" fn queue_present_khr(
             }
         }
 
-        Ok(())
+        Ok(ret)
     })
 }
 
