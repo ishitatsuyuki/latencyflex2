@@ -5,7 +5,9 @@ use std::collections::HashSet;
 use std::ffi::CStr;
 use std::mem::MaybeUninit;
 use std::ops::DerefMut;
+use std::panic::Location;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use std::{iter, mem};
 
 use bumpalo::collections::CollectIn;
@@ -28,18 +30,34 @@ mod thread_pool;
 mod vk_layer;
 
 type VkResult<T> = Result<T, vk::Result>;
+#[track_caller]
 fn convert_vk_result(f: impl FnOnce() -> VkResult<()>) -> vk::Result {
-    match f() {
+    let t0 = Instant::now();
+    let ret = match f() {
         Ok(()) => vk::Result::SUCCESS,
         Err(err) => err,
+    };
+    let t1 = Instant::now();
+    if t1 - t0 > std::time::Duration::from_micros(500) {
+        let caller = Location::caller();
+        eprintln!("LFX2: took {:?} at {}", t1 - t0, caller);
     }
+    ret
 }
 
+#[track_caller]
 fn convert_vk_result_multi_success(f: impl FnOnce() -> VkResult<vk::Result>) -> vk::Result {
-    match f() {
+    let t0 = Instant::now();
+    let ret = match f() {
         Ok(result) => result,
         Err(err) => err,
+    };
+    let t1 = Instant::now();
+    if t1 - t0 > std::time::Duration::from_micros(500) {
+        let caller = Location::caller();
+        eprintln!("LFX2: took {:?} at {}", t1 - t0, caller);
     }
+    ret
 }
 
 unsafe fn get_instance_override(name: &str) -> Option<vk::FnVoidFunction> {
@@ -631,7 +649,12 @@ unsafe extern "system" fn queue_present_khr(
             }
         });
 
+        let t0 = Instant::now();
         let ret = device.queue_present_khr(queue, &*p_present_info)?;
+        let t1 = Instant::now();
+        if t1 - t0 > std::time::Duration::from_micros(500) {
+            eprintln!("LFX2: took {:?} at QueuePresent", t1 - t0);
+        }
 
         if let Some(present_id) = present_id {
             let mut global_state = state::get_global_state();
@@ -717,16 +740,18 @@ unsafe extern "system" fn set_latency_sleep_mode_nv(
     swapchain: Option<vk::SwapchainKHR>,
     p_sleep_mode_info: *const vk::LatencySleepModeInfoNV,
 ) -> vk::Result {
-    let device = device.unwrap();
-    let swapchain = swapchain.unwrap();
-    let mut global_state = state::get_global_state();
-    let global_state = global_state.deref_mut();
-    let device = global_state.device_table.get_mut(&device).unwrap();
-    let swapchain_state = device.swapchains.get_mut(&swapchain).unwrap();
+    convert_vk_result(|| {
+        let device = device.unwrap();
+        let swapchain = swapchain.unwrap();
+        let mut global_state = state::get_global_state();
+        let global_state = global_state.deref_mut();
+        let device = global_state.device_table.get_mut(&device).unwrap();
+        let swapchain_state = device.swapchains.get_mut(&swapchain).unwrap();
 
-    swapchain_state.enabled = (*p_sleep_mode_info).low_latency_mode != vk::FALSE;
+        swapchain_state.enabled = (*p_sleep_mode_info).low_latency_mode != vk::FALSE;
 
-    vk::Result::SUCCESS
+        Ok(())
+    })
 }
 
 unsafe extern "system" fn latency_sleep_nv(
@@ -734,60 +759,61 @@ unsafe extern "system" fn latency_sleep_nv(
     swapchain: Option<vk::SwapchainKHR>,
     p_sleep_info: *const vk::LatencySleepInfoNV,
 ) -> vk::Result {
-    let device = device.unwrap();
-    let swapchain = swapchain.unwrap();
-    let mut global_state = state::get_global_state();
-    let global_state = global_state.deref_mut();
-    let device_state = global_state.device_table.get_mut(&device).unwrap();
-    let swapchain_state = device_state.swapchains.get_mut(&swapchain).unwrap();
-    let info = p_sleep_info.as_ref().unwrap();
+    convert_vk_result(|| {
+        let device = device.unwrap();
+        let swapchain = swapchain.unwrap();
+        let mut global_state = state::get_global_state();
+        let global_state = global_state.deref_mut();
+        let device_state = global_state.device_table.get_mut(&device).unwrap();
+        let swapchain_state = device_state.swapchains.get_mut(&swapchain).unwrap();
+        let info = p_sleep_info.as_ref().unwrap();
 
-    for (i, queue) in device_state.queues.iter().enumerate() {
-        let queue_state = global_state.queue_table.get_mut(&queue).unwrap();
-        while let Some(res) = device_state
-            .vulkan_tracker
-            .get_result(queue_state.queue_family_index, queue_state.queue_index)
-        {
-            match res {
-                FenceWorkerResult::Submission(stats) => {
-                    queue_state.stats.accumulate(&stats);
-                }
-                FenceWorkerResult::Notification(frame) => {
-                    if let Some(frame) = frame {
-                        device_state.aggregator.lock().unwrap().mark(
-                            frame.id,
-                            StageId(i),
-                            queue_state.stats.stats(),
-                        );
+        for (i, queue) in device_state.queues.iter().enumerate() {
+            let queue_state = global_state.queue_table.get_mut(&queue).unwrap();
+            while let Some(res) = device_state
+                .vulkan_tracker
+                .get_result(queue_state.queue_family_index, queue_state.queue_index)
+            {
+                match res {
+                    FenceWorkerResult::Submission(stats) => {
+                        queue_state.stats.accumulate(&stats);
                     }
-                    queue_state.stats.reset();
+                    FenceWorkerResult::Notification(frame) => {
+                        if let Some(frame) = frame {
+                            device_state.aggregator.lock().unwrap().mark(
+                                frame.id,
+                                StageId(i),
+                                queue_state.stats.stats(),
+                            );
+                        }
+                        queue_state.stats.reset();
+                    }
                 }
             }
         }
-    }
 
-    let (frame_id, deadline) = device_state.aggregator.lock().unwrap().new_frame();
-    let vk_frame = LayerFrame {
-        id: frame_id,
-        inner: Arc::new(Mutex::new(LayerFrameInner {
-            agg: Arc::downgrade(&device_state.aggregator),
+        let (frame_id, deadline) = device_state.aggregator.lock().unwrap().new_frame();
+        let vk_frame = LayerFrame {
             id: frame_id,
-        })),
-    };
-    swapchain_state
-        .sleep_thread_tx
-        .as_ref()
-        .unwrap()
-        .send(SleepJob {
-            deadline,
-            semaphore: info.signal_semaphore.unwrap(),
-            value: info.value,
-        })
-        .unwrap();
-    device_state.frame_tracker.recalibrate();
-    device_state.frame_tracker.add_frame(vk_frame);
-
-    vk::Result::SUCCESS
+            inner: Arc::new(Mutex::new(LayerFrameInner {
+                agg: Arc::downgrade(&device_state.aggregator),
+                id: frame_id,
+            })),
+        };
+        swapchain_state
+            .sleep_thread_tx
+            .as_ref()
+            .unwrap()
+            .send(SleepJob {
+                deadline,
+                semaphore: info.signal_semaphore.unwrap(),
+                value: info.value,
+            })
+            .unwrap();
+        device_state.frame_tracker.recalibrate();
+        device_state.frame_tracker.add_frame(vk_frame);
+        Ok(())
+    })
 }
 unsafe extern "system" fn set_latency_marker_nv(
     device: Option<vk::Device>,
