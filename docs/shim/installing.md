@@ -152,11 +152,26 @@ To configure environment variables, using `KEY=value` as an example:
 
 - `DXVK_NVAPI_LOG_LEVEL=info`: Set this to enable DXVK-NVAPI logging.
 
-## Configuration Files
+## Additional Setup (Non-NVIDIA GPUs only)
 
-### Required (Non-NVIDIA GPUs only)
+### dxvk.conf
 
 Put `dxgi.customVendorId = 10de` in `dxvk.conf` to allow NVAPI usage with non-NVIDIA GPUs.
+
+### `nvngx.dll` Workaround
+
+Some games with DLSS support will hang on launch if NVAPI is spoofed without an NVIDIA driver.
+This is caused by the DLSS SDK trying to load `nvngx.dll` and getting stuck if a loop if it does not succeed.
+
+[CyberFSR2](https://www.nexusmods.com/cyberpunk2077/mods/3001?tab=files) contains a vendor-agnostic `nvngx` implementation and can be used to resolve such hangs.
+
+Download the mod from the link, then install with the following instructions (differs from what the mod recommends):
+
+1. Copy `nvngx.dll` to `$COMPATDATA/pfx/drive_c/windows/system32/`.
+2. Import `EnableSignatureOverride.reg`. If you have `protontricks` installed, this can be done with:
+   ```sh
+   protontricks -c "regedit /path/to/EnableSignatureOverride.reg" $APPID
+   ```
 
 ## Enabling or disabling explicit latency markers
 
