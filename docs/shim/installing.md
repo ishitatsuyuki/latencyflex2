@@ -145,7 +145,7 @@ To configure environment variables, using `KEY=value` as an example:
 
 ### Required (Non-NVIDIA GPUs only)
 
-- `DXVK_NVAPI_DRIVER_VERSION=49729`: Override the driver version as one that has Reflex support.
+- `DXVK_NVAPI_DRIVER_VERSION=51215`: Override the driver version as one that has Reflex support.
 - `DXVK_NVAPI_ALLOW_OTHER_DRIVERS=1`: Enable NVAPI usage with non-NVIDIA GPUs.
 
 ### Diagnostics
