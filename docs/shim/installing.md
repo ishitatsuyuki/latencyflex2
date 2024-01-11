@@ -161,14 +161,16 @@ Put `dxgi.customVendorId = 10de` in `dxvk.conf` to allow NVAPI usage with non-NV
 ### `nvngx.dll` Workaround
 
 Some games with DLSS support will hang on launch if NVAPI is spoofed without an NVIDIA driver.
-This is caused by the DLSS SDK trying to load `nvngx.dll` and getting stuck if a loop if it does not succeed.
+This is caused by the DLSS SDK trying to load `nvngx.dll` and getting stuck in a loop if it does not succeed.
 
-[CyberFSR2](https://www.nexusmods.com/cyberpunk2077/mods/3001?tab=files) contains a vendor-agnostic `nvngx` implementation and can be used to resolve such hangs.
+The following step installs an empty `nvngx.dll` that pleases the DLSS SDK:
 
-Download the mod from the link, then install with the following instructions (differs from what the mod recommends):
-
-1. Copy `nvngx.dll` to `$COMPATDATA/pfx/drive_c/windows/system32/`.
-2. Import `EnableSignatureOverride.reg`. If you have `protontricks` installed, this can be done with:
+1. Create an empty `nvngx.dll` with the following command:
+   ```sh
+   x86_64-w64-mingw32-cc -shared -static-libgcc -o nvngx.dll /dev/null
+   ```
+2. Copy `nvngx.dll` to `$COMPATDATA/pfx/drive_c/windows/system32/`.
+3. Import [EnableSignatureOverride.reg](/files/EnableSignatureOverride.reg). If you have `protontricks` installed, this can be done with:
    ```sh
    protontricks -c "regedit /path/to/EnableSignatureOverride.reg" $APPID
    ```
