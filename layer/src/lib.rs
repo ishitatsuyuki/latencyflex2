@@ -26,7 +26,7 @@ use crate::spark_ext::SparkResultExt;
 
 mod spark_ext;
 mod state;
-mod thread_pool;
+// mod thread_pool;
 mod vk_layer;
 
 type VkResult<T> = Result<T, vk::Result>;

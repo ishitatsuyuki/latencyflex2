@@ -73,7 +73,7 @@ impl DeviceState {
             swapchains: HashMap::new(),
             aggregator: Arc::new(Mutex::new(FrameAggregator::new(
                 Default::default(),
-                queues.len(),
+                queues.iter().map(|(_, queues)| queues.len()).sum(),
             ))),
             frame_tracker: ReflexMappingTracker::new(),
             vulkan_tracker: VulkanContext::new(
