@@ -13,6 +13,7 @@ use latencyflex2_core::{
 use crate::VkResult;
 
 pub struct SleepJob {
+    pub device: Arc<spark::Device>,
     pub deadline: Timestamp,
     pub semaphore: vk::Semaphore,
     pub value: u64,
@@ -126,18 +127,13 @@ pub struct SwapchainState {
 }
 
 impl SwapchainState {
-    pub fn new(device: vk::Device) -> VkResult<Self> {
+    pub fn new() -> VkResult<Self> {
         let (sleep_thread_tx, sleep_thread_rx) = mpsc::channel::<SleepJob>();
         let sleep_thread = thread::spawn(move || {
             while let Ok(job) = sleep_thread_rx.recv() {
-                let device = {
-                    let mut global_state = get_global_state();
-                    let device_state = global_state.device_table.get_mut(&device).unwrap();
-                    device_state.device.clone()
-                };
                 time::sleep_until(job.deadline);
                 unsafe {
-                    let res = device.signal_semaphore(
+                    let res = job.device.signal_semaphore(
                         &vk::SemaphoreSignalInfo::builder()
                             .value(job.value)
                             .semaphore(job.semaphore),

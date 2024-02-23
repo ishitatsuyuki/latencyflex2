@@ -1,3 +1,5 @@
+#![allow(invalid_reference_casting)]
+
 extern crate core;
 
 use core::slice;
@@ -38,7 +40,7 @@ fn convert_vk_result(f: impl FnOnce() -> VkResult<()>) -> vk::Result {
         Err(err) => err,
     };
     let t1 = Instant::now();
-    if t1 - t0 > std::time::Duration::from_micros(500) {
+    if t1 - t0 > std::time::Duration::from_micros(300) {
         let caller = Location::caller();
         eprintln!("LFX2: took {:?} at {}", t1 - t0, caller);
     }
@@ -53,7 +55,7 @@ fn convert_vk_result_multi_success(f: impl FnOnce() -> VkResult<vk::Result>) -> 
         Err(err) => err,
     };
     let t1 = Instant::now();
-    if t1 - t0 > std::time::Duration::from_micros(500) {
+    if t1 - t0 > std::time::Duration::from_micros(300) {
         let caller = Location::caller();
         eprintln!("LFX2: took {:?} at {}", t1 - t0, caller);
     }
@@ -448,7 +450,7 @@ unsafe extern "system" fn create_swapchain_khr(
             .create_swapchain_khr(&*p_create_info, p_allocator.as_ref())?;
 
         if latency_create_info.is_some_and(|i| i.latency_mode_enable != vk::FALSE) {
-            let state = SwapchainState::new(device);
+            let state = SwapchainState::new();
             let state = match state {
                 Ok(state) => state,
                 Err(err) => {
@@ -652,7 +654,7 @@ unsafe extern "system" fn queue_present_khr(
         let t0 = Instant::now();
         let ret = device.queue_present_khr(queue, &*p_present_info)?;
         let t1 = Instant::now();
-        if t1 - t0 > std::time::Duration::from_micros(500) {
+        if t1 - t0 > std::time::Duration::from_micros(300) {
             eprintln!("LFX2: took {:?} at QueuePresent", t1 - t0);
         }
 
@@ -805,6 +807,7 @@ unsafe extern "system" fn latency_sleep_nv(
             .as_ref()
             .unwrap()
             .send(SleepJob {
+                device: device_state.device.clone(),
                 deadline,
                 semaphore: info.signal_semaphore.unwrap(),
                 value: info.value,
