@@ -848,11 +848,10 @@ unsafe extern "system" fn set_latency_marker_nv(
 unsafe extern "system" fn get_latency_timings_nv(
     _device: Option<vk::Device>,
     _swapchain: Option<vk::SwapchainKHR>,
-    p_timing_count: *mut u32,
-    _p_latency_marker_info: *mut vk::GetLatencyMarkerInfoNV,
+    p_latency_marker_info: *mut vk::GetLatencyMarkerInfoNV,
 ) {
     // Stub.
-    p_timing_count.write(0);
+    (*p_latency_marker_info).timing_count = 0;
 }
 unsafe extern "system" fn queue_notify_out_of_band_nv(
     _queue: Option<vk::Queue>,
